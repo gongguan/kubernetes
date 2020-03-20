@@ -45,6 +45,7 @@ go_library(
         "//pkg/kubelet/apis:go_default_library",
         "//pkg/kubelet/apis/config:go_default_library",
         "//pkg/kubelet/apis/podresources:go_default_library",
+        "//pkg/kubelet/basicinfo:go_default_library",
         "//pkg/kubelet/cadvisor:go_default_library",
         "//pkg/kubelet/certificate:go_default_library",
         "//pkg/kubelet/checkpointmanager:go_default_library",
@@ -278,6 +279,7 @@ filegroup(
     srcs = [
         ":package-srcs",
         "//pkg/kubelet/apis:all-srcs",
+        "//pkg/kubelet/basicinfo:all-srcs",
         "//pkg/kubelet/cadvisor:all-srcs",
         "//pkg/kubelet/certificate:all-srcs",
         "//pkg/kubelet/checkpoint:all-srcs",
