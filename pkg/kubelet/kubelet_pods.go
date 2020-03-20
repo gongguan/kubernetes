@@ -68,6 +68,7 @@ import (
 )
 
 const (
+	// TODO remove all.
 	managedHostsHeader                = "# Kubernetes-managed hosts file.\n"
 	managedHostsHeaderWithHostNetwork = "# Kubernetes-managed hosts file (host network).\n"
 )
@@ -94,6 +95,7 @@ func (kl *Kubelet) GetActivePods() []*v1.Pod {
 	return activePods
 }
 
+// TODO drop it later
 // makeBlockVolumes maps the raw block devices specified in the path of the container
 // Experimental
 func (kl *Kubelet) makeBlockVolumes(pod *v1.Pod, container *v1.Container, podVolumes kubecontainer.VolumeMap, blkutil volumepathhandler.BlockVolumePathHandler) ([]kubecontainer.DeviceInfo, error) {
@@ -127,6 +129,7 @@ func (kl *Kubelet) makeBlockVolumes(pod *v1.Pod, container *v1.Container, podVol
 	return devices, nil
 }
 
+// TODO remove it
 // makeMounts determines the mount points for the given container.
 func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, hostDomain string, podIPs []string, podVolumes kubecontainer.VolumeMap, hu hostutil.HostUtils, subpather subpath.Interface, expandEnvs []kubecontainer.EnvVar) ([]kubecontainer.Mount, func(), error) {
 	// Kubernetes only mounts on /etc/hosts if:
@@ -267,6 +270,7 @@ func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, h
 	return mounts, cleanupAction, nil
 }
 
+// TODO remove it.
 // translateMountPropagation transforms v1.MountPropagationMode to
 // runtimeapi.MountPropagation.
 func translateMountPropagation(mountMode *v1.MountPropagationMode) (runtimeapi.MountPropagation, error) {
@@ -291,6 +295,7 @@ func translateMountPropagation(mountMode *v1.MountPropagationMode) (runtimeapi.M
 	}
 }
 
+// TODO remove it directly.
 // makeHostsMount makes the mountpoint for the hosts file that the containers
 // in a pod are injected with. podIPs is provided instead of podIP as podIPs
 // are present even if dual-stack feature flag is not enabled.
@@ -308,6 +313,7 @@ func makeHostsMount(podDir string, podIPs []string, hostName, hostDomainName str
 	}, nil
 }
 
+// TODO remove it directly.
 // ensureHostsFile ensures that the given host file has an up-to-date ip, host
 // name, and domain name.
 func ensureHostsFile(fileName string, hostIPs []string, hostName, hostDomainName string, hostAliases []v1.HostAlias, useHostNetwork bool) error {
@@ -330,6 +336,7 @@ func ensureHostsFile(fileName string, hostIPs []string, hostName, hostDomainName
 	return ioutil.WriteFile(fileName, hostsFileContent, 0644)
 }
 
+// TODO remove it directly.
 // nodeHostsFileContent reads the content of node's hosts file.
 func nodeHostsFileContent(hostsFilePath string, hostAliases []v1.HostAlias) ([]byte, error) {
 	hostsFileContent, err := ioutil.ReadFile(hostsFilePath)
@@ -343,6 +350,7 @@ func nodeHostsFileContent(hostsFilePath string, hostAliases []v1.HostAlias) ([]b
 	return buffer.Bytes(), nil
 }
 
+// TODO remove it directly.
 // managedHostsFileContent generates the content of the managed etc hosts based on Pod IPs and other
 // information.
 func managedHostsFileContent(hostIPs []string, hostName, hostDomainName string, hostAliases []v1.HostAlias) []byte {
@@ -370,6 +378,7 @@ func managedHostsFileContent(hostIPs []string, hostName, hostDomainName string, 
 	return buffer.Bytes()
 }
 
+// TODO remove it directly.
 func hostsEntriesFromHostAliases(hostAliases []v1.HostAlias) []byte {
 	if len(hostAliases) == 0 {
 		return []byte{}
@@ -385,6 +394,7 @@ func hostsEntriesFromHostAliases(hostAliases []v1.HostAlias) []byte {
 	return buffer.Bytes()
 }
 
+// TODO drop it.
 // truncatePodHostnameIfNeeded truncates the pod hostname if it's longer than 63 chars.
 func truncatePodHostnameIfNeeded(podName, hostname string) (string, error) {
 	// Cap hostname at 63 chars (specification is 64bytes which is 63 chars and the null terminating char).
@@ -403,6 +413,7 @@ func truncatePodHostnameIfNeeded(podName, hostname string) (string, error) {
 	return truncated, nil
 }
 
+// TODO drop it directly.
 // GeneratePodHostNameAndDomain creates a hostname and domain name for a pod,
 // given that pod's spec and annotations or returns an error.
 func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *v1.Pod) (string, string, error) {
@@ -432,6 +443,7 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *v1.Pod) (string, string, er
 	return hostname, hostDomain, nil
 }
 
+// TODO drop it directly.
 // GetPodCgroupParent gets pod cgroup parent from container manager.
 func (kl *Kubelet) GetPodCgroupParent(pod *v1.Pod) string {
 	pcm := kl.containerManager.NewPodContainerManager()
@@ -439,6 +451,7 @@ func (kl *Kubelet) GetPodCgroupParent(pod *v1.Pod) string {
 	return cgroupParent
 }
 
+// TODO drop it directly.
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by
 // the container runtime to set parameters for launching a container.
 func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Container, podIP string, podIPs []string) (*kubecontainer.RunContainerOptions, func(), error) {
@@ -497,8 +510,10 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Contai
 	return opts, cleanupAction, nil
 }
 
+// TODO remove it directly.
 var masterServices = sets.NewString("kubernetes")
 
+// TODO remove it directly.
 // getServiceEnvVarMap makes a map[string]string of env vars for services a
 // pod in namespace ns should see.
 func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[string]string, error) {
@@ -551,6 +566,7 @@ func (kl *Kubelet) getServiceEnvVarMap(ns string, enableServiceLinks bool) (map[
 	return m, nil
 }
 
+// TODO drop it later
 // Make the environment variables for a pod in the given namespace.
 func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container, podIP string, podIPs []string) ([]kubecontainer.EnvVar, error) {
 	if pod.Spec.EnableServiceLinks == nil {
@@ -775,6 +791,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container
 	return result, nil
 }
 
+// TODO remove it.
 // podFieldSelectorRuntimeValue returns the runtime value of the given
 // selector for a pod.
 func (kl *Kubelet) podFieldSelectorRuntimeValue(fs *v1.ObjectFieldSelector, pod *v1.Pod, podIP string, podIPs []string) (string, error) {
@@ -801,6 +818,7 @@ func (kl *Kubelet) podFieldSelectorRuntimeValue(fs *v1.ObjectFieldSelector, pod 
 	return fieldpath.ExtractFieldPathAsString(pod, internalFieldPath)
 }
 
+// TODO remove it directly.
 // containerResourceRuntimeValue returns the value of the provided container resource
 func containerResourceRuntimeValue(fs *v1.ResourceFieldSelector, pod *v1.Pod, container *v1.Container) (string, error) {
 	containerName := fs.ContainerName
@@ -1743,6 +1761,7 @@ func (kl *Kubelet) cleanupOrphanedPodCgroups(cgroupPods map[types.UID]cm.CgroupN
 	}
 }
 
+// TODO remove it
 // enableHostUserNamespace determines if the host user namespace should be used by the container runtime.
 // Returns true if the pod is using a host pid, pic, or network namespace, the pod is using a non-namespaced
 // capability, the pod contains a privileged container, or the pod has a host path volume.
@@ -1758,6 +1777,7 @@ func (kl *Kubelet) enableHostUserNamespace(pod *v1.Pod) bool {
 	return false
 }
 
+// TODO remove it.
 // hasNonNamespacedCapability returns true if MKNOD, SYS_TIME, or SYS_MODULE is requested for any container.
 func hasNonNamespacedCapability(pod *v1.Pod) bool {
 	for _, c := range pod.Spec.Containers {
@@ -1773,6 +1793,7 @@ func hasNonNamespacedCapability(pod *v1.Pod) bool {
 	return false
 }
 
+// TODO remove it.
 // hasHostVolume returns true if the pod spec has a HostPath volume.
 func hasHostVolume(pod *v1.Pod) bool {
 	for _, v := range pod.Spec.Volumes {
@@ -1783,6 +1804,7 @@ func hasHostVolume(pod *v1.Pod) bool {
 	return false
 }
 
+// TODO remove it.
 // hasHostNamespace returns true if hostIPC, hostNetwork, or hostPID are set to true.
 func hasHostNamespace(pod *v1.Pod) bool {
 	if pod.Spec.SecurityContext == nil {
@@ -1791,6 +1813,7 @@ func hasHostNamespace(pod *v1.Pod) bool {
 	return pod.Spec.HostIPC || pod.Spec.HostNetwork || pod.Spec.HostPID
 }
 
+// TODO remove it.
 // hasHostMountPVC returns true if a PVC is referencing a HostPath volume.
 func (kl *Kubelet) hasHostMountPVC(pod *v1.Pod) bool {
 	for _, volume := range pod.Spec.Volumes {

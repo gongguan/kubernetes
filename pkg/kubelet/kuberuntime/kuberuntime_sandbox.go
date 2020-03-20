@@ -88,7 +88,8 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		Annotations: newPodAnnotations(pod),
 	}
 
-	dnsConfig, err := m.runtimeHelper.GetPodDNS(pod)
+	//dnsConfig, err := m.runtimeHelper.GetPodDNS(pod)
+	dnsConfig, err := m.GetPodDNS(pod)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +97,8 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 
 	if !kubecontainer.IsHostNetworkPod(pod) {
 		// TODO: Add domain support in new runtime interface
-		hostname, _, err := m.runtimeHelper.GeneratePodHostNameAndDomain(pod)
+		//hostname, _, err := m.runtimeHelper.GeneratePodHostNameAndDomain(pod)
+		hostname, _, err := m.GeneratePodHostNameAndDomain(pod)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +141,8 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 
 // generatePodSandboxLinuxConfig generates LinuxPodSandboxConfig from v1.Pod.
 func (m *kubeGenericRuntimeManager) generatePodSandboxLinuxConfig(pod *v1.Pod) (*runtimeapi.LinuxPodSandboxConfig, error) {
-	cgroupParent := m.runtimeHelper.GetPodCgroupParent(pod)
+	//cgroupParent := m.runtimeHelper.GetPodCgroupParent(pod)
+	cgroupParent := m.GetPodCgroupParent(pod)
 	lc := &runtimeapi.LinuxPodSandboxConfig{
 		CgroupParent: cgroupParent,
 		SecurityContext: &runtimeapi.LinuxSandboxSecurityContext{
@@ -172,7 +175,8 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxLinuxConfig(pod *v1.Pod) (
 		if sc.FSGroup != nil {
 			lc.SecurityContext.SupplementalGroups = append(lc.SecurityContext.SupplementalGroups, int64(*sc.FSGroup))
 		}
-		if groups := m.runtimeHelper.GetExtraSupplementalGroupsForPod(pod); len(groups) > 0 {
+		//if groups := m.runtimeHelper.GetExtraSupplementalGroupsForPod(pod); len(groups) > 0 {
+		if groups := m.GetExtraSupplementalGroupsForPod(pod); len(groups) > 0 {
 			lc.SecurityContext.SupplementalGroups = append(lc.SecurityContext.SupplementalGroups, groups...)
 		}
 		if sc.SupplementalGroups != nil {

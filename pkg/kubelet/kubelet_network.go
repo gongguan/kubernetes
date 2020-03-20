@@ -40,6 +40,7 @@ const (
 	KubeFirewallChain utiliptables.Chain = "KUBE-FIREWALL"
 )
 
+// TODO remove it directly.
 // providerRequiresNetworkingConfiguration returns whether the cloud provider
 // requires special networking configuration.
 func (kl *Kubelet) providerRequiresNetworkingConfiguration() bool {

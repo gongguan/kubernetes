@@ -121,6 +121,7 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/kubernetes/pkg/volume/util/volumepathhandler"
+	"k8s.io/kubernetes/pkg/kubelet/basicinfo"
 )
 
 const (
@@ -562,6 +563,29 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		protocol = utilipt.ProtocolIpv6
 	}
 
+	externalCloudProvider := cloudprovider.IsExternal(cloudProvider)
+	experimentalHostUserNamespaceDefaulting := utilfeature.DefaultFeatureGate.Enabled(features.ExperimentalHostUserNamespaceDefaultingGate)
+
+	basicInfo := basicinfo.NewBasicInfo(
+		hostname,
+		nodeName,
+		clock.RealClock{},
+		rootDirectory,
+		kubeDeps.KubeClient,
+		masterServiceNamespace,
+		nodeLabels,
+		kubeDeps.Recorder,
+		serviceLister,
+		nodeLister,
+		providerID,
+		externalCloudProvider,
+		kubeDeps.Cloud,
+		registerSchedulable,
+		registerWithTaints,
+		kubeCfg.EnableControllerAttachDetach,
+		experimentalHostUserNamespaceDefaulting,
+		keepTerminatedPodVolumes)
+
 	klet := &Kubelet{
 		hostname:                                hostname,
 		hostnameOverridden:                      len(hostnameOverride) > 0,
@@ -570,6 +594,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		heartbeatClient:                         kubeDeps.HeartbeatClient,
 		onRepeatedHeartbeatFailure:              kubeDeps.OnHeartbeatFailure,
 		rootDirectory:                           rootDirectory,
+		basicInfo:                               basicInfo,
 		resyncInterval:                          kubeCfg.SyncFrequency.Duration,
 		sourcesReady:                            config.NewSourcesReady(kubeDeps.PodConfig.SeenAllSources),
 		registerNode:                            registerNode,
@@ -583,7 +608,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		recorder:                                kubeDeps.Recorder,
 		cadvisor:                                kubeDeps.CAdvisorInterface,
 		cloud:                                   kubeDeps.Cloud,
-		externalCloudProvider:                   cloudprovider.IsExternal(cloudProvider),
+		externalCloudProvider:                   externalCloudProvider,
 		providerID:                              providerID,
 		nodeRef:                                 nodeRef,
 		nodeLabels:                              nodeLabels,
@@ -611,7 +636,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		makeIPTablesUtilChains:                  kubeCfg.MakeIPTablesUtilChains,
 		iptablesMasqueradeBit:                   int(kubeCfg.IPTablesMasqueradeBit),
 		iptablesDropBit:                         int(kubeCfg.IPTablesDropBit),
-		experimentalHostUserNamespaceDefaulting: utilfeature.DefaultFeatureGate.Enabled(features.ExperimentalHostUserNamespaceDefaultingGate),
+		experimentalHostUserNamespaceDefaulting: experimentalHostUserNamespaceDefaulting,
 		keepTerminatedPodVolumes:                keepTerminatedPodVolumes,
 		nodeStatusMaxImages:                     nodeStatusMaxImages,
 	}
@@ -681,7 +706,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	runtime, err := kuberuntime.NewKubeGenericRuntimeManager(
-		kubecontainer.FilterEventRecorder(kubeDeps.Recorder),
 		klet.livenessManager,
 		klet.startupManager,
 		seccompProfileRoot,
@@ -689,7 +713,14 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		machineInfo,
 		klet,
 		kubeDeps.OSInterface,
-		klet,
+		klet.basicInfo,
+		klet.containerManager,
+		klet.configMapManager,
+		klet.secretManager,
+		klet.dnsConfigurer,
+		klet.volumeManager,
+		klet.hostutil,
+		klet.subpather,
 		httpClient,
 		imageBackOff,
 		kubeCfg.SerializeImagePulls,
@@ -890,11 +921,14 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	// Generating the status funcs should be the last thing we do,
 	// since this relies on the rest of the Kubelet having been constructed.
-	klet.setNodeStatusFuncs = klet.defaultNodeStatusFuncs()
+	//klet.setNodeStatusFuncs = klet.defaultNodeStatusFuncs()
+
+	klet.basicInfo.NodeStatusFuncs = klet.defaultNodeStatusFuncs()
 
 	return klet, nil
 }
 
+// TODO remove it.
 type serviceLister interface {
 	List(labels.Selector) ([]*v1.Service, error)
 }
@@ -908,12 +942,15 @@ type Kubelet struct {
 	// hostnameOverridden indicates the hostname was overridden via flag/config
 	hostnameOverridden bool
 
+	// TODO inject to basic info, don't remove.
 	nodeName        types.NodeName
 	runtimeCache    kubecontainer.RuntimeCache
 	kubeClient      clientset.Interface
 	heartbeatClient clientset.Interface
 	iptClient       utilipt.Interface
 	rootDirectory   string
+
+	basicInfo *basicinfo.BasicInfo
 
 	lastObservedNodeAddressesMux sync.RWMutex
 	lastObservedNodeAddresses    []v1.NodeAddress
@@ -948,8 +985,10 @@ type Kubelet struct {
 
 	// Set to true to have the node register itself with the apiserver.
 	registerNode bool
+	// TODO remove it directly
 	// List of taints to add to a node object when the kubelet registers itself.
 	registerWithTaints []api.Taint
+	// TODO remove it directly
 	// Set to true to have the node register itself as schedulable.
 	registerSchedulable bool
 	// for internal book keeping; access only from within registerWithApiserver
@@ -958,13 +997,18 @@ type Kubelet struct {
 	// dnsConfigurer is used for setting up DNS resolver configuration when launching pods.
 	dnsConfigurer *dns.Configurer
 
+	// TODO remove it, move to basicinfo.
 	// masterServiceNamespace is the namespace that the master service is exposed in.
 	masterServiceNamespace string
+
+	// TODO remove it, move to basicinfo.
 	// serviceLister knows how to list services
 	serviceLister serviceLister
+	// TODO remove it, move to basicinfo.
 	// nodeLister knows how to list nodes
 	nodeLister corelisters.NodeLister
 
+	// TODO remove it, move to basicinfo.
 	// a list of node labels to register
 	nodeLabels map[string]string
 
@@ -1144,6 +1188,7 @@ type Kubelet struct {
 	// use this function to validate the kubelet nodeIP
 	nodeIPValidator func(net.IP) error
 
+	// TODO remove it directly.
 	// If non-nil, this is a unique identifier for the node in an external database, eg. cloudprovider
 	providerID string
 
@@ -1177,6 +1222,7 @@ type Kubelet struct {
 	// the number of allowed pods per core
 	podsPerCore int
 
+	// TODO remove it directly.
 	// enableControllerAttachDetach indicates the Attach/Detach controller
 	// should manage attachment/detachment of volumes scheduled to this node,
 	// and disable kubelet from executing any attach/detach operations

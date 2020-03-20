@@ -235,6 +235,7 @@ func (kl *Kubelet) GetNode() (*v1.Node, error) {
 	return kl.nodeLister.Get(string(kl.nodeName))
 }
 
+// TODO remove it after others use basic info.
 // getNodeAnyWay() must return a *v1.Node which is required by RunGeneralPredicates().
 // The *v1.Node is obtained as follows:
 // Return kubelet's nodeInfo for this node, except on error or if in standalone mode,
@@ -268,6 +269,7 @@ func (kl *Kubelet) GetHostIP() (net.IP, error) {
 	return utilnode.GetNodeHostIP(node)
 }
 
+// TODO remove it directly.
 // getHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
 // the initialNode.
 func (kl *Kubelet) getHostIPAnyWay() (net.IP, error) {

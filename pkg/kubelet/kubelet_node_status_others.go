@@ -18,6 +18,7 @@ limitations under the License.
 
 package kubelet
 
+// TODO remove this file.
 func getOSSpecificLabels() (map[string]string, error) {
 	return nil, nil
 }

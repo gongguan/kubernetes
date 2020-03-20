@@ -25,6 +25,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/v1/resource"
 )
 
+// TODO remove it.
 // defaultPodLimitsForDownwardAPI copies the input pod, and optional container,
 // and applies default resource limits. it returns a copy of the input pod,
 // and a copy of the input container (if specified) with default limits

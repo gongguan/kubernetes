@@ -214,6 +214,7 @@ func (kl *Kubelet) reconcileCMADAnnotationWithExistingNode(node, existingNode *v
 	return true
 }
 
+// TODO remove it and use basic info.
 // initialNode constructs the initial v1.Node for this Kubelet, incorporating node
 // labels, information from the cloud provider, and Kubelet configuration.
 func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
@@ -509,6 +510,7 @@ func (kl *Kubelet) recordNodeSchedulableEvent(node *v1.Node) error {
 	return nil
 }
 
+// TODO remove it directly.
 // setNodeStatus fills in the Status fields of the given Node, overwriting
 // any fields that are currently set.
 // TODO(madhusudancs): Simplify the logic for setting node conditions and

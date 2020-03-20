@@ -51,6 +51,14 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/util/cache"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
 	"k8s.io/kubernetes/pkg/kubelet/util/logreduction"
+
+	"k8s.io/kubernetes/pkg/kubelet/network/dns"
+	"k8s.io/kubernetes/pkg/kubelet/volumemanager"
+	"k8s.io/kubernetes/pkg/kubelet/basicinfo"
+	"k8s.io/kubernetes/pkg/volume/util/hostutil"
+	"k8s.io/kubernetes/pkg/volume/util/subpath"
+	"k8s.io/kubernetes/pkg/kubelet/configmap"
+	"k8s.io/kubernetes/pkg/kubelet/secret"
 )
 
 const (
@@ -96,8 +104,30 @@ type kubeGenericRuntimeManager struct {
 	// Runner of lifecycle events.
 	runner kubecontainer.HandlerRunner
 
+	// TODO drop it at last.
 	// RuntimeHelper that wraps kubelet to generate runtime container options.
 	runtimeHelper kubecontainer.RuntimeHelper
+
+	containerManager cm.ContainerManager
+
+	dnsConfigurer *dns.Configurer
+
+	// ConfigMap manager.
+	configMapManager configmap.Manager
+
+	// Secret manager.
+	secretManager secret.Manager
+
+	volumeManager volumemanager.VolumeManager
+
+	// TODO init in kubelet and import it.
+	basicInfo *basicinfo.BasicInfo
+
+	// hostutil to interact with filesystems
+	hostutil hostutil.HostUtils
+
+	// subpather to execute subpath actions
+	subpather subpath.Interface
 
 	// Health check results.
 	livenessManager proberesults.Manager
@@ -150,7 +180,6 @@ type LegacyLogProvider interface {
 
 // NewKubeGenericRuntimeManager creates a new kubeGenericRuntimeManager
 func NewKubeGenericRuntimeManager(
-	recorder record.EventRecorder,
 	livenessManager proberesults.Manager,
 	startupManager proberesults.Manager,
 	seccompProfileRoot string,
@@ -158,7 +187,14 @@ func NewKubeGenericRuntimeManager(
 	machineInfo *cadvisorapi.MachineInfo,
 	podStateProvider podStateProvider,
 	osInterface kubecontainer.OSInterface,
-	runtimeHelper kubecontainer.RuntimeHelper,
+	basicinfo *basicinfo.BasicInfo,
+	containerManager cm.ContainerManager,
+	configMapManager configmap.Manager,
+	secretManager secret.Manager,
+	dnsConfigurer *dns.Configurer,
+	volumeManager volumemanager.VolumeManager,
+	hostutil hostutil.HostUtils,
+	subpather subpath.Interface,
 	httpClient types.HTTPGetter,
 	imageBackOff *flowcontrol.Backoff,
 	serializeImagePulls bool,
@@ -173,7 +209,7 @@ func NewKubeGenericRuntimeManager(
 	runtimeClassManager *runtimeclass.Manager,
 ) (KubeGenericRuntime, error) {
 	kubeRuntimeManager := &kubeGenericRuntimeManager{
-		recorder:            recorder,
+		recorder:            kubecontainer.FilterEventRecorder(basicinfo.Recorder),
 		cpuCFSQuota:         cpuCFSQuota,
 		cpuCFSQuotaPeriod:   cpuCFSQuotaPeriod,
 		seccompProfileRoot:  seccompProfileRoot,
@@ -182,7 +218,14 @@ func NewKubeGenericRuntimeManager(
 		containerRefManager: containerRefManager,
 		machineInfo:         machineInfo,
 		osInterface:         osInterface,
-		runtimeHelper:       runtimeHelper,
+		basicInfo:           basicinfo,
+		containerManager:    containerManager,
+		configMapManager:    configMapManager,
+		secretManager:       secretManager,
+		dnsConfigurer:       dnsConfigurer,
+		volumeManager:       volumeManager,
+		hostutil:            hostutil,
+		subpather:           subpather,
 		runtimeService:      newInstrumentedRuntimeService(runtimeService),
 		imageService:        newInstrumentedImageManagerService(imageService),
 		keyring:             credentialprovider.NewDockerKeyring(),
@@ -223,7 +266,7 @@ func NewKubeGenericRuntimeManager(
 	}
 
 	kubeRuntimeManager.imagePuller = images.NewImageManager(
-		kubecontainer.FilterEventRecorder(recorder),
+		kubecontainer.FilterEventRecorder(basicinfo.Recorder),
 		kubeRuntimeManager,
 		imageBackOff,
 		serializeImagePulls,
