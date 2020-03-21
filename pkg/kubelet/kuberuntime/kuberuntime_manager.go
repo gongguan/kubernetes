@@ -284,6 +284,7 @@ func NewKubeGenericRuntimeManager(
 	return kubeRuntimeManager, nil
 }
 
+// set kubeGenericRuntimeManager.volumeManager when Kubelet.volumeManager is ready.
 func (m *kubeGenericRuntimeManager) SetVolumeManager(volumeManager volumemanager.VolumeManager) {
 	m.volumeManager = volumeManager
 }

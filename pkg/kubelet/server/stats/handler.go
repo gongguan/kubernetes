@@ -102,6 +102,8 @@ type Provider interface {
 	// as whether the pod was found.
 	GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool)
 
+	// GetBasicInfo() get kubelet.basicInfo
+	// remove it after we don't inject kubelet to ResourceAnalyzer.
 	GetBasicInfo() *basicinfo.BasicInfo
 }
 
