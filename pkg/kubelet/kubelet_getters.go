@@ -17,10 +17,8 @@ limitations under the License.
 package kubelet
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"path/filepath"
 
 	cadvisorapiv1 "github.com/google/cadvisor/info/v1"
@@ -34,7 +32,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubelettypes "k8s.io/kubernetes/pkg/kubelet/types"
-	utilnode "k8s.io/kubernetes/pkg/util/node"
 )
 
 // getRootDir returns the full path to the directory under which kubelet can
@@ -89,12 +86,6 @@ func (kl *Kubelet) getVolumeDevicePluginDir(pluginName string) string {
 	return filepath.Join(kl.getVolumeDevicePluginsDir(), pluginName, config.DefaultKubeletVolumeDevicesDirName)
 }
 
-// GetPodDir returns the full path to the per-pod data directory for the
-// specified pod. This directory may not exist if the pod does not exist.
-func (kl *Kubelet) GetPodDir(podUID types.UID) string {
-	return kl.getPodDir(podUID)
-}
-
 // getPodDir returns the full path to the per-pod directory for the pod with
 // the given UID.
 func (kl *Kubelet) getPodDir(podUID types.UID) string {
@@ -147,13 +138,6 @@ func (kl *Kubelet) getPodPluginsDir(podUID types.UID) string {
 // need to persist.  For non-per-pod plugin data, see getPluginDir.
 func (kl *Kubelet) getPodPluginDir(podUID types.UID, pluginName string) string {
 	return filepath.Join(kl.getPodPluginsDir(podUID), pluginName)
-}
-
-// getPodContainerDir returns the full path to the per-pod data directory under
-// which container data is held for the specified pod.  This directory may not
-// exist if the pod or container does not exist.
-func (kl *Kubelet) getPodContainerDir(podUID types.UID, ctrName string) string {
-	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletContainersDirName, ctrName)
 }
 
 // getPodResourcesSocket returns the full path to the directory containing the pod resources socket
@@ -227,30 +211,6 @@ func (kl *Kubelet) getRuntime() kubecontainer.Runtime {
 	return kl.containerRuntime
 }
 
-// TODO remove it directly.
-// GetNode returns the node info for the configured node name of this Kubelet.
-func (kl *Kubelet) GetNode() (*v1.Node, error) {
-	if kl.kubeClient == nil {
-		return kl.initialNode(context.TODO())
-	}
-	return kl.nodeLister.Get(string(kl.nodeName))
-}
-
-// TODO remove it after others use basic info.
-// getNodeAnyWay() must return a *v1.Node which is required by RunGeneralPredicates().
-// The *v1.Node is obtained as follows:
-// Return kubelet's nodeInfo for this node, except on error or if in standalone mode,
-// in which case return a manufactured nodeInfo representing a node with no pods,
-// zero capacity, and the default labels.
-func (kl *Kubelet) getNodeAnyWay() (*v1.Node, error) {
-	if kl.kubeClient != nil {
-		if n, err := kl.nodeLister.Get(string(kl.nodeName)); err == nil {
-			return n, nil
-		}
-	}
-	return kl.initialNode(context.TODO())
-}
-
 // GetNodeConfig returns the container manager node config.
 func (kl *Kubelet) GetNodeConfig() cm.NodeConfig {
 	return kl.containerManager.GetNodeConfig()
@@ -259,27 +219,6 @@ func (kl *Kubelet) GetNodeConfig() cm.NodeConfig {
 // GetPodCgroupRoot returns the listeral cgroupfs value for the cgroup containing all pods
 func (kl *Kubelet) GetPodCgroupRoot() string {
 	return kl.containerManager.GetPodCgroupRoot()
-}
-
-// TODO remove it directly.
-// GetHostIP returns host IP or nil in case of error.
-func (kl *Kubelet) GetHostIP() (net.IP, error) {
-	node, err := kl.GetNode()
-	if err != nil {
-		return nil, fmt.Errorf("cannot get node: %v", err)
-	}
-	return utilnode.GetNodeHostIP(node)
-}
-
-// TODO remove it directly.
-// getHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
-// the initialNode.
-func (kl *Kubelet) getHostIPAnyWay() (net.IP, error) {
-	node, err := kl.getNodeAnyWay()
-	if err != nil {
-		return nil, err
-	}
-	return utilnode.GetNodeHostIP(node)
 }
 
 // getPodVolumePathListFromDisk returns a list of the volume paths by reading the

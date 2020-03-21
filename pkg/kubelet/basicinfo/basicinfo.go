@@ -134,23 +134,34 @@ func NewBasicInfo(
 	}
 }
 
+// GetPodDir returns the full path to the per-pod data directory for the
+// specified pod. This directory may not exist if the pod does not exist.
 func (b *BasicInfo) GetPodDir(podUID types.UID) string {
 	return filepath.Join(b.getPodsDir(), string(podUID))
 }
 
+// getPodDir returns the full path to the per-pod directory for the pod with
+// the given UID.
 func (b *BasicInfo) getPodsDir() string {
 	return filepath.Join(b.getRootDir(), config.DefaultKubeletPodsDirName)
 }
 
+// getRootDir returns the full path to the directory under which kubelet can
+// store data.  These functions are useful to pass interfaces to other modules
+// that may need to know where to write data without getting a whole kubelet
+// instance.
 func (b *BasicInfo) getRootDir() string {
 	return b.rootDirectory
 }
 
+// getPodContainerDir returns the full path to the per-pod data directory under
+// which container data is held for the specified pod.  This directory may not
+// exist if the pod or container does not exist.
 func (b *BasicInfo) GetPodContainerDir(podUID types.UID, ctrName string) string {
 	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletContainersDirName, ctrName)
 }
 
-// getHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
+// GetHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
 // the initialNode.
 func (b *BasicInfo) GetHostIPAnyWay() (net.IP, error) {
 	node, err := b.GetNodeAnyWay()

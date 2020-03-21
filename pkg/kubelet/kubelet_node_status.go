@@ -20,28 +20,23 @@ import (
 	"context"
 	"fmt"
 	"net"
-	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	cloudprovider "k8s.io/cloud-provider"
-	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog"
-	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 	nodeutil "k8s.io/kubernetes/pkg/util/node"
-	taintutil "k8s.io/kubernetes/pkg/util/taints"
 	volutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
@@ -214,164 +209,6 @@ func (kl *Kubelet) reconcileCMADAnnotationWithExistingNode(node, existingNode *v
 	return true
 }
 
-// TODO remove it directly.
-// initialNode constructs the initial v1.Node for this Kubelet, incorporating node
-// labels, information from the cloud provider, and Kubelet configuration.
-func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
-	node := &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: string(kl.nodeName),
-			Labels: map[string]string{
-				v1.LabelHostname:      kl.hostname,
-				v1.LabelOSStable:      goruntime.GOOS,
-				v1.LabelArchStable:    goruntime.GOARCH,
-				kubeletapis.LabelOS:   goruntime.GOOS,
-				kubeletapis.LabelArch: goruntime.GOARCH,
-			},
-		},
-		Spec: v1.NodeSpec{
-			Unschedulable: !kl.registerSchedulable,
-		},
-	}
-	osLabels, err := getOSSpecificLabels()
-	if err != nil {
-		return nil, err
-	}
-	for label, value := range osLabels {
-		node.Labels[label] = value
-	}
-
-	nodeTaints := make([]v1.Taint, 0)
-	if len(kl.registerWithTaints) > 0 {
-		taints := make([]v1.Taint, len(kl.registerWithTaints))
-		for i := range kl.registerWithTaints {
-			if err := k8s_api_v1.Convert_core_Taint_To_v1_Taint(&kl.registerWithTaints[i], &taints[i], nil); err != nil {
-				return nil, err
-			}
-		}
-		nodeTaints = append(nodeTaints, taints...)
-	}
-
-	unschedulableTaint := v1.Taint{
-		Key:    v1.TaintNodeUnschedulable,
-		Effect: v1.TaintEffectNoSchedule,
-	}
-
-	// Taint node with TaintNodeUnschedulable when initializing
-	// node to avoid race condition; refer to #63897 for more detail.
-	if node.Spec.Unschedulable &&
-		!taintutil.TaintExists(nodeTaints, &unschedulableTaint) {
-		nodeTaints = append(nodeTaints, unschedulableTaint)
-	}
-
-	if kl.externalCloudProvider {
-		taint := v1.Taint{
-			Key:    cloudproviderapi.TaintExternalCloudProvider,
-			Value:  "true",
-			Effect: v1.TaintEffectNoSchedule,
-		}
-
-		nodeTaints = append(nodeTaints, taint)
-	}
-	if len(nodeTaints) > 0 {
-		node.Spec.Taints = nodeTaints
-	}
-	// Initially, set NodeNetworkUnavailable to true.
-	if kl.providerRequiresNetworkingConfiguration() {
-		node.Status.Conditions = append(node.Status.Conditions, v1.NodeCondition{
-			Type:               v1.NodeNetworkUnavailable,
-			Status:             v1.ConditionTrue,
-			Reason:             "NoRouteCreated",
-			Message:            "Node created without a route",
-			LastTransitionTime: metav1.NewTime(kl.clock.Now()),
-		})
-	}
-
-	if kl.enableControllerAttachDetach {
-		if node.Annotations == nil {
-			node.Annotations = make(map[string]string)
-		}
-
-		klog.Infof("Setting node annotation to enable volume controller attach/detach")
-		node.Annotations[volutil.ControllerManagedAttachAnnotation] = "true"
-	} else {
-		klog.Infof("Controller attach/detach is disabled for this node; Kubelet will attach and detach volumes")
-	}
-
-	if kl.keepTerminatedPodVolumes {
-		if node.Annotations == nil {
-			node.Annotations = make(map[string]string)
-		}
-		klog.Infof("Setting node annotation to keep pod volumes of terminated pods attached to the node")
-		node.Annotations[volutil.KeepTerminatedPodVolumesAnnotation] = "true"
-	}
-
-	// @question: should this be place after the call to the cloud provider? which also applies labels
-	for k, v := range kl.nodeLabels {
-		if cv, found := node.ObjectMeta.Labels[k]; found {
-			klog.Warningf("the node label %s=%s will overwrite default setting %s", k, v, cv)
-		}
-		node.ObjectMeta.Labels[k] = v
-	}
-
-	if kl.providerID != "" {
-		node.Spec.ProviderID = kl.providerID
-	}
-
-	if kl.cloud != nil {
-		instances, ok := kl.cloud.Instances()
-		if !ok {
-			return nil, fmt.Errorf("failed to get instances from cloud provider")
-		}
-
-		// TODO: We can't assume that the node has credentials to talk to the
-		// cloudprovider from arbitrary nodes. At most, we should talk to a
-		// local metadata server here.
-		var err error
-		if node.Spec.ProviderID == "" {
-			node.Spec.ProviderID, err = cloudprovider.GetInstanceProviderID(ctx, kl.cloud, kl.nodeName)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		instanceType, err := instances.InstanceType(ctx, kl.nodeName)
-		if err != nil {
-			return nil, err
-		}
-		if instanceType != "" {
-			klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelInstanceType, instanceType)
-			node.ObjectMeta.Labels[v1.LabelInstanceType] = instanceType
-			klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelInstanceTypeStable, instanceType)
-			node.ObjectMeta.Labels[v1.LabelInstanceTypeStable] = instanceType
-		}
-		// If the cloud has zone information, label the node with the zone information
-		zones, ok := kl.cloud.Zones()
-		if ok {
-			zone, err := zones.GetZone(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get zone from cloud provider: %v", err)
-			}
-			if zone.FailureDomain != "" {
-				klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneFailureDomain, zone.FailureDomain)
-				node.ObjectMeta.Labels[v1.LabelZoneFailureDomain] = zone.FailureDomain
-				klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneFailureDomainStable, zone.FailureDomain)
-				node.ObjectMeta.Labels[v1.LabelZoneFailureDomainStable] = zone.FailureDomain
-			}
-			if zone.Region != "" {
-				klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneRegion, zone.Region)
-				node.ObjectMeta.Labels[v1.LabelZoneRegion] = zone.Region
-				klog.Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneRegionStable, zone.Region)
-				node.ObjectMeta.Labels[v1.LabelZoneRegionStable] = zone.Region
-			}
-		}
-	}
-
-	kl.setNodeStatus(node)
-
-	return node, nil
-}
-
 // syncNodeStatus should be called periodically from a goroutine.
 // It synchronizes node status to master if there is any change or enough time
 // passed from the last sync, registering the kubelet first if necessary.
@@ -508,20 +345,6 @@ func (kl *Kubelet) recordNodeSchedulableEvent(node *v1.Node) error {
 		kl.lastNodeUnschedulable = node.Spec.Unschedulable
 	}
 	return nil
-}
-
-// TODO remove it directly.
-// setNodeStatus fills in the Status fields of the given Node, overwriting
-// any fields that are currently set.
-// TODO(madhusudancs): Simplify the logic for setting node conditions and
-// refactor the node status condition code out to a different file.
-func (kl *Kubelet) setNodeStatus(node *v1.Node) {
-	for i, f := range kl.setNodeStatusFuncs {
-		klog.V(5).Infof("Setting node status at position %v", i)
-		if err := f(node); err != nil {
-			klog.Errorf("Failed to set some node status fields: %s", err)
-		}
-	}
 }
 
 func (kl *Kubelet) setLastObservedNodeAddresses(addresses []v1.NodeAddress) {
