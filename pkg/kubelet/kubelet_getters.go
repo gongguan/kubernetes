@@ -201,7 +201,7 @@ func (kl *Kubelet) GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool) {
 	return nil, false
 }
 
-// remove it when kubelet no more injected to ResourceAnalyzer.
+// TODO remove it when kubelet no more injected to ResourceAnalyzer.
 // GetNode returns the node info for the configured node name of this Kubelet.
 func (kl *Kubelet) GetNode() (*v1.Node, error) {
 	return kl.basicInfo.GetNode()
