@@ -26,124 +26,12 @@ import (
 	"k8s.io/utils/mount"
 	utilpath "k8s.io/utils/path"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
-	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubelettypes "k8s.io/kubernetes/pkg/kubelet/types"
 )
-
-// getRootDir returns the full path to the directory under which kubelet can
-// store data.  These functions are useful to pass interfaces to other modules
-// that may need to know where to write data without getting a whole kubelet
-// instance.
-func (kl *Kubelet) getRootDir() string {
-	return kl.rootDirectory
-}
-
-// getPodsDir returns the full path to the directory under which pod
-// directories are created.
-func (kl *Kubelet) getPodsDir() string {
-	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPodsDirName)
-}
-
-// getPluginsDir returns the full path to the directory under which plugin
-// directories are created.  Plugins can use these directories for data that
-// they need to persist.  Plugins should create subdirectories under this named
-// after their own names.
-func (kl *Kubelet) getPluginsDir() string {
-	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPluginsDirName)
-}
-
-// getPluginsRegistrationDir returns the full path to the directory under which
-// plugins socket should be placed to be registered.
-// More information is available about plugin registration in the pluginwatcher
-// module
-func (kl *Kubelet) getPluginsRegistrationDir() string {
-	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPluginsRegistrationDirName)
-}
-
-// getPluginDir returns a data directory name for a given plugin name.
-// Plugins can use these directories to store data that they need to persist.
-// For per-pod plugin data, see getPodPluginDir.
-func (kl *Kubelet) getPluginDir(pluginName string) string {
-	return filepath.Join(kl.getPluginsDir(), pluginName)
-}
-
-// getVolumeDevicePluginsDir returns the full path to the directory under which plugin
-// directories are created.  Plugins can use these directories for data that
-// they need to persist.  Plugins should create subdirectories under this named
-// after their own names.
-func (kl *Kubelet) getVolumeDevicePluginsDir() string {
-	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPluginsDirName)
-}
-
-// getVolumeDevicePluginDir returns a data directory name for a given plugin name.
-// Plugins can use these directories to store data that they need to persist.
-// For per-pod plugin data, see getVolumeDevicePluginsDir.
-func (kl *Kubelet) getVolumeDevicePluginDir(pluginName string) string {
-	return filepath.Join(kl.getVolumeDevicePluginsDir(), pluginName, config.DefaultKubeletVolumeDevicesDirName)
-}
-
-// getPodDir returns the full path to the per-pod directory for the pod with
-// the given UID.
-func (kl *Kubelet) getPodDir(podUID types.UID) string {
-	return filepath.Join(kl.getPodsDir(), string(podUID))
-}
-
-// getPodVolumesSubpathsDir returns the full path to the per-pod subpaths directory under
-// which subpath volumes are created for the specified pod.  This directory may not
-// exist if the pod does not exist or subpaths are not specified.
-func (kl *Kubelet) getPodVolumeSubpathsDir(podUID types.UID) string {
-	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletVolumeSubpathsDirName)
-}
-
-// getPodVolumesDir returns the full path to the per-pod data directory under
-// which volumes are created for the specified pod.  This directory may not
-// exist if the pod does not exist.
-func (kl *Kubelet) getPodVolumesDir(podUID types.UID) string {
-	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletVolumesDirName)
-}
-
-// getPodVolumeDir returns the full path to the directory which represents the
-// named volume under the named plugin for specified pod.  This directory may not
-// exist if the pod does not exist.
-func (kl *Kubelet) getPodVolumeDir(podUID types.UID, pluginName string, volumeName string) string {
-	return filepath.Join(kl.getPodVolumesDir(podUID), pluginName, volumeName)
-}
-
-// getPodVolumeDevicesDir returns the full path to the per-pod data directory under
-// which volumes are created for the specified pod. This directory may not
-// exist if the pod does not exist.
-func (kl *Kubelet) getPodVolumeDevicesDir(podUID types.UID) string {
-	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletVolumeDevicesDirName)
-}
-
-// getPodVolumeDeviceDir returns the full path to the directory which represents the
-// named plugin for specified pod. This directory may not exist if the pod does not exist.
-func (kl *Kubelet) getPodVolumeDeviceDir(podUID types.UID, pluginName string) string {
-	return filepath.Join(kl.getPodVolumeDevicesDir(podUID), pluginName)
-}
-
-// getPodPluginsDir returns the full path to the per-pod data directory under
-// which plugins may store data for the specified pod.  This directory may not
-// exist if the pod does not exist.
-func (kl *Kubelet) getPodPluginsDir(podUID types.UID) string {
-	return filepath.Join(kl.getPodDir(podUID), config.DefaultKubeletPluginsDirName)
-}
-
-// getPodPluginDir returns a data directory name for a given plugin name for a
-// given pod UID.  Plugins can use these directories to store data that they
-// need to persist.  For non-per-pod plugin data, see getPluginDir.
-func (kl *Kubelet) getPodPluginDir(podUID types.UID, pluginName string) string {
-	return filepath.Join(kl.getPodPluginsDir(podUID), pluginName)
-}
-
-// getPodResourcesSocket returns the full path to the directory containing the pod resources socket
-func (kl *Kubelet) getPodResourcesDir() string {
-	return filepath.Join(kl.getRootDir(), config.DefaultKubeletPodResourcesDirName)
-}
 
 // GetPods returns all pods bound to the kubelet and their spec, and the mirror
 // pods.
@@ -226,7 +114,7 @@ func (kl *Kubelet) GetPodCgroupRoot() string {
 // volume directories for the given pod from the disk.
 func (kl *Kubelet) getPodVolumePathListFromDisk(podUID types.UID) ([]string, error) {
 	volumes := []string{}
-	podVolDir := kl.getPodVolumesDir(podUID)
+	podVolDir := kl.basicInfo.GetPodVolumesDir(podUID)
 
 	if pathExists, pathErr := mount.PathExists(podVolDir); pathErr != nil {
 		return volumes, fmt.Errorf("error checking if path %q exists: %v", podVolDir, pathErr)
@@ -275,7 +163,7 @@ func (kl *Kubelet) getMountedVolumePathListFromDisk(podUID types.UID) ([]string,
 // podVolumesSubpathsDirExists returns true if the pod volume-subpaths directory for
 // a given pod exists
 func (kl *Kubelet) podVolumeSubpathsDirExists(podUID types.UID) (bool, error) {
-	podVolDir := kl.getPodVolumeSubpathsDir(podUID)
+	podVolDir := kl.basicInfo.GetPodVolumeSubpathsDir(podUID)
 
 	if pathExists, pathErr := mount.PathExists(podVolDir); pathErr != nil {
 		return true, fmt.Errorf("error checking if path %q exists: %v", podVolDir, pathErr)

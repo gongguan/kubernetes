@@ -591,7 +591,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		kubeClient:                              kubeDeps.KubeClient,
 		heartbeatClient:                         kubeDeps.HeartbeatClient,
 		onRepeatedHeartbeatFailure:              kubeDeps.OnHeartbeatFailure,
-		rootDirectory:                           rootDirectory,
 		basicInfo:                               basicInfo,
 		resyncInterval:                          kubeCfg.SyncFrequency.Duration,
 		sourcesReady:                            config.NewSourcesReady(kubeDeps.PodConfig.SeenAllSources),
@@ -834,7 +833,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		return nil, err
 	}
 	klet.pluginManager = pluginmanager.NewPluginManager(
-		klet.getPluginsRegistrationDir(), /* sockDir */
+		klet.basicInfo.GetPluginsRegistrationDir(), /* sockDir */
 		kubeDeps.Recorder,
 	)
 
@@ -858,7 +857,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klet.containerRuntime,
 		kubeDeps.Mounter,
 		kubeDeps.HostUtil,
-		klet.getPodsDir(),
+		klet.basicInfo.GetPodsDir(),
 		kubeDeps.Recorder,
 		experimentalCheckNodeCapabilitiesBeforeMount,
 		keepTerminatedPodVolumes,
@@ -943,7 +942,6 @@ type Kubelet struct {
 	kubeClient      clientset.Interface
 	heartbeatClient clientset.Interface
 	iptClient       utilipt.Interface
-	rootDirectory   string
 
 	basicInfo *basicinfo.BasicInfo
 
@@ -1282,25 +1280,25 @@ func (kl *Kubelet) GetBasicInfo() *basicinfo.BasicInfo {
 // 3.  the plugins directory
 // 4.  the pod-resources directory
 func (kl *Kubelet) setupDataDirs() error {
-	kl.rootDirectory = path.Clean(kl.rootDirectory)
-	pluginRegistrationDir := kl.getPluginsRegistrationDir()
-	pluginsDir := kl.getPluginsDir()
-	if err := os.MkdirAll(kl.getRootDir(), 0750); err != nil {
+	kl.basicInfo.SetRootDir(path.Clean(kl.basicInfo.GetRootDir()))
+	pluginRegistrationDir := kl.basicInfo.GetPluginsRegistrationDir()
+	pluginsDir := kl.basicInfo.GetPluginsDir()
+	if err := os.MkdirAll(kl.basicInfo.GetRootDir(), 0750); err != nil {
 		return fmt.Errorf("error creating root directory: %v", err)
 	}
-	if err := kl.hostutil.MakeRShared(kl.getRootDir()); err != nil {
+	if err := kl.hostutil.MakeRShared(kl.basicInfo.GetRootDir()); err != nil {
 		return fmt.Errorf("error configuring root directory: %v", err)
 	}
-	if err := os.MkdirAll(kl.getPodsDir(), 0750); err != nil {
+	if err := os.MkdirAll(kl.basicInfo.GetPodsDir(), 0750); err != nil {
 		return fmt.Errorf("error creating pods directory: %v", err)
 	}
-	if err := os.MkdirAll(kl.getPluginsDir(), 0750); err != nil {
+	if err := os.MkdirAll(kl.basicInfo.GetPluginsDir(), 0750); err != nil {
 		return fmt.Errorf("error creating plugins directory: %v", err)
 	}
-	if err := os.MkdirAll(kl.getPluginsRegistrationDir(), 0750); err != nil {
+	if err := os.MkdirAll(kl.basicInfo.GetPluginsRegistrationDir(), 0750); err != nil {
 		return fmt.Errorf("error creating plugins registry directory: %v", err)
 	}
-	if err := os.MkdirAll(kl.getPodResourcesDir(), 0750); err != nil {
+	if err := os.MkdirAll(kl.basicInfo.GetPodResourcesDir(), 0750); err != nil {
 		return fmt.Errorf("error creating podresources directory: %v", err)
 	}
 	if selinux.SELinuxEnabled() {
@@ -2279,7 +2277,7 @@ func (kl *Kubelet) ListenAndServeReadOnly(address net.IP, port uint, enableCAdvi
 
 // ListenAndServePodResources runs the kubelet podresources grpc service
 func (kl *Kubelet) ListenAndServePodResources() {
-	socket, err := util.LocalEndpoint(kl.getPodResourcesDir(), podresources.Socket)
+	socket, err := util.LocalEndpoint(kl.basicInfo.GetPodResourcesDir(), podresources.Socket)
 	if err != nil {
 		klog.V(2).Infof("Failed to get local endpoint for PodResources endpoint: %v", err)
 		return

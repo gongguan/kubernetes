@@ -144,33 +144,6 @@ func (b *BasicInfo) GetNodeName() types.NodeName {
 	return b.nodeName
 }
 
-// GetPodDir returns the full path to the per-pod data directory for the
-// specified pod. This directory may not exist if the pod does not exist.
-func (b *BasicInfo) GetPodDir(podUID types.UID) string {
-	return filepath.Join(b.getPodsDir(), string(podUID))
-}
-
-// getPodDir returns the full path to the per-pod directory for the pod with
-// the given UID.
-func (b *BasicInfo) getPodsDir() string {
-	return filepath.Join(b.getRootDir(), config.DefaultKubeletPodsDirName)
-}
-
-// getRootDir returns the full path to the directory under which kubelet can
-// store data.  These functions are useful to pass interfaces to other modules
-// that may need to know where to write data without getting a whole kubelet
-// instance.
-func (b *BasicInfo) getRootDir() string {
-	return b.rootDirectory
-}
-
-// getPodContainerDir returns the full path to the per-pod data directory under
-// which container data is held for the specified pod.  This directory may not
-// exist if the pod or container does not exist.
-func (b *BasicInfo) GetPodContainerDir(podUID types.UID, ctrName string) string {
-	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletContainersDirName, ctrName)
-}
-
 // GetHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
 // the initialNode.
 func (b *BasicInfo) GetHostIPAnyWay() (net.IP, error) {
@@ -385,4 +358,126 @@ func (b *BasicInfo) providerRequiresNetworkingConfiguration() bool {
 	}
 	_, supported := b.cloud.Routes()
 	return supported
+}
+
+// getRootDir returns the full path to the directory under which kubelet can
+// store data.  These functions are useful to pass interfaces to other modules
+// that may need to know where to write data without getting a whole kubelet
+// instance.
+func (b *BasicInfo) GetRootDir() string {
+	return b.rootDirectory
+}
+
+func (b *BasicInfo) SetRootDir(dir string) {
+	b.rootDirectory = dir
+}
+
+// getPodsDir returns the full path to the directory under which pod
+// directories are created.
+func (b *BasicInfo) GetPodsDir() string {
+	return filepath.Join(b.GetRootDir(), config.DefaultKubeletPodsDirName)
+}
+
+// getPluginsDir returns the full path to the directory under which plugin
+// directories are created.  Plugins can use these directories for data that
+// they need to persist.  Plugins should create subdirectories under this named
+// after their own names.
+func (b *BasicInfo) GetPluginsDir() string {
+	return filepath.Join(b.GetRootDir(), config.DefaultKubeletPluginsDirName)
+}
+
+// getPluginsRegistrationDir returns the full path to the directory under which
+// plugins socket should be placed to be registered.
+// More information is available about plugin registration in the pluginwatcher
+// module
+func (b *BasicInfo) GetPluginsRegistrationDir() string {
+	return filepath.Join(b.GetRootDir(), config.DefaultKubeletPluginsRegistrationDirName)
+}
+
+// getPluginDir returns a data directory name for a given plugin name.
+// Plugins can use these directories to store data that they need to persist.
+// For per-pod plugin data, see getPodPluginDir.
+func (b *BasicInfo) GetPluginDir(pluginName string) string {
+	return filepath.Join(b.GetPluginsDir(), pluginName)
+}
+
+// getVolumeDevicePluginsDir returns the full path to the directory under which plugin
+// directories are created.  Plugins can use these directories for data that
+// they need to persist.  Plugins should create subdirectories under this named
+// after their own names.
+func (b *BasicInfo) GetVolumeDevicePluginsDir() string {
+	return filepath.Join(b.GetRootDir(), config.DefaultKubeletPluginsDirName)
+}
+
+// getVolumeDevicePluginDir returns a data directory name for a given plugin name.
+// Plugins can use these directories to store data that they need to persist.
+// For per-pod plugin data, see getVolumeDevicePluginsDir.
+func (b *BasicInfo) GetVolumeDevicePluginDir(pluginName string) string {
+	return filepath.Join(b.GetVolumeDevicePluginsDir(), pluginName, config.DefaultKubeletVolumeDevicesDirName)
+}
+
+// getPodDir returns the full path to the per-pod directory for the pod with
+// the given UID.
+func (b *BasicInfo) GetPodDir(podUID types.UID) string {
+	return filepath.Join(b.GetPodsDir(), string(podUID))
+}
+
+// getPodVolumesSubpathsDir returns the full path to the per-pod subpaths directory under
+// which subpath volumes are created for the specified pod.  This directory may not
+// exist if the pod does not exist or subpaths are not specified.
+func (b *BasicInfo) GetPodVolumeSubpathsDir(podUID types.UID) string {
+	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletVolumeSubpathsDirName)
+}
+
+// getPodVolumesDir returns the full path to the per-pod data directory under
+// which volumes are created for the specified pod.  This directory may not
+// exist if the pod does not exist.
+func (b *BasicInfo) GetPodVolumesDir(podUID types.UID) string {
+	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletVolumesDirName)
+}
+
+// getPodVolumeDir returns the full path to the directory which represents the
+// named volume under the named plugin for specified pod.  This directory may not
+// exist if the pod does not exist.
+func (b *BasicInfo) GetPodVolumeDir(podUID types.UID, pluginName string, volumeName string) string {
+	return filepath.Join(b.GetPodVolumesDir(podUID), pluginName, volumeName)
+}
+
+// getPodVolumeDevicesDir returns the full path to the per-pod data directory under
+// which volumes are created for the specified pod. This directory may not
+// exist if the pod does not exist.
+func (b *BasicInfo) GetPodVolumeDevicesDir(podUID types.UID) string {
+	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletVolumeDevicesDirName)
+}
+
+// getPodVolumeDeviceDir returns the full path to the directory which represents the
+// named plugin for specified pod. This directory may not exist if the pod does not exist.
+func (b *BasicInfo) GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string {
+	return filepath.Join(b.GetPodVolumeDevicesDir(podUID), pluginName)
+}
+
+// getPodPluginsDir returns the full path to the per-pod data directory under
+// which plugins may store data for the specified pod.  This directory may not
+// exist if the pod does not exist.
+func (b *BasicInfo) GetPodPluginsDir(podUID types.UID) string {
+	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletPluginsDirName)
+}
+
+// getPodPluginDir returns a data directory name for a given plugin name for a
+// given pod UID.  Plugins can use these directories to store data that they
+// need to persist.  For non-per-pod plugin data, see getPluginDir.
+func (b *BasicInfo) GetPodPluginDir(podUID types.UID, pluginName string) string {
+	return filepath.Join(b.GetPodPluginsDir(podUID), pluginName)
+}
+
+// getPodContainerDir returns the full path to the per-pod data directory under
+// which container data is held for the specified pod.  This directory may not
+// exist if the pod or container does not exist.
+func (b *BasicInfo) GetPodContainerDir(podUID types.UID, ctrName string) string {
+	return filepath.Join(b.GetPodDir(podUID), config.DefaultKubeletContainersDirName, ctrName)
+}
+
+// getPodResourcesSocket returns the full path to the directory containing the pod resources socket
+func (b *BasicInfo) GetPodResourcesDir() string {
+	return filepath.Join(b.GetRootDir(), config.DefaultKubeletPodResourcesDirName)
 }

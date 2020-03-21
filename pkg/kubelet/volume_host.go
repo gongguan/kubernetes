@@ -100,7 +100,7 @@ var _ volume.VolumeHost = &kubeletVolumeHost{}
 var _ volume.KubeletVolumeHost = &kubeletVolumeHost{}
 
 func (kvh *kubeletVolumeHost) GetPluginDir(pluginName string) string {
-	return kvh.kubelet.getPluginDir(pluginName)
+	return kvh.kubelet.basicInfo.GetPluginDir(pluginName)
 }
 
 type kubeletVolumeHost struct {
@@ -120,15 +120,15 @@ func (kvh *kubeletVolumeHost) SetKubeletError(err error) {
 }
 
 func (kvh *kubeletVolumeHost) GetVolumeDevicePluginDir(pluginName string) string {
-	return kvh.kubelet.getVolumeDevicePluginDir(pluginName)
+	return kvh.kubelet.basicInfo.GetVolumeDevicePluginDir(pluginName)
 }
 
 func (kvh *kubeletVolumeHost) GetPodsDir() string {
-	return kvh.kubelet.getPodsDir()
+	return kvh.kubelet.basicInfo.GetPodsDir()
 }
 
 func (kvh *kubeletVolumeHost) GetPodVolumeDir(podUID types.UID, pluginName string, volumeName string) string {
-	dir := kvh.kubelet.getPodVolumeDir(podUID, pluginName, volumeName)
+	dir := kvh.kubelet.basicInfo.GetPodVolumeDir(podUID, pluginName, volumeName)
 	if runtime.GOOS == "windows" {
 		dir = util.GetWindowsPath(dir)
 	}
@@ -136,11 +136,11 @@ func (kvh *kubeletVolumeHost) GetPodVolumeDir(podUID types.UID, pluginName strin
 }
 
 func (kvh *kubeletVolumeHost) GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string {
-	return kvh.kubelet.getPodVolumeDeviceDir(podUID, pluginName)
+	return kvh.kubelet.basicInfo.GetPodVolumeDeviceDir(podUID, pluginName)
 }
 
 func (kvh *kubeletVolumeHost) GetPodPluginDir(podUID types.UID, pluginName string) string {
-	return kvh.kubelet.getPodPluginDir(podUID, pluginName)
+	return kvh.kubelet.basicInfo.GetPodPluginDir(podUID, pluginName)
 }
 
 func (kvh *kubeletVolumeHost) GetKubeClient() clientset.Interface {
