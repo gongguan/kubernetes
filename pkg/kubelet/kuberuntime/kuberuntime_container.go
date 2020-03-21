@@ -263,7 +263,6 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 
 // generateContainerConfig generates container config for kubelet runtime v1.
 func (m *kubeGenericRuntimeManager) generateContainerConfig(container *v1.Container, pod *v1.Pod, restartCount int, podIP, imageRef string, podIPs []string, nsTarget *kubecontainer.ContainerID) (*runtimeapi.ContainerConfig, func(), error) {
-	//opts, cleanupAction, err := m.runtimeHelper.GenerateRunContainerOptions(pod, container, podIP, podIPs)
 	opts, cleanupAction, err := m.GenerateRunContainerOptions(pod, container, podIP, podIPs)
 	if err != nil {
 		return nil, nil, err

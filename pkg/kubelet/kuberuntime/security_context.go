@@ -64,7 +64,6 @@ func (m *kubeGenericRuntimeManager) determineEffectiveSecurityContext(pod *v1.Po
 			}
 		}
 	}
-	//if groups := m.runtimeHelper.GetExtraSupplementalGroupsForPod(pod); len(groups) > 0 {
 	if groups := m.GetExtraSupplementalGroupsForPod(pod); len(groups) > 0 {
 		synthesized.SupplementalGroups = append(synthesized.SupplementalGroups, groups...)
 	}
