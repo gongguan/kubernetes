@@ -135,10 +135,6 @@ func (fk *fakeKubelet) GetKubeletContainerLogs(ctx context.Context, podFullName,
 	return fk.containerLogsFunc(ctx, podFullName, containerName, logOptions, stdout, stderr)
 }
 
-func (fk *fakeKubelet) GetHostname() string {
-	return fk.hostnameFunc()
-}
-
 func (fk *fakeKubelet) RunInContainer(podFullName string, uid types.UID, containerName string, cmd []string) ([]byte, error) {
 	return fk.runFunc(podFullName, uid, containerName, cmd)
 }

@@ -587,9 +587,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		keepTerminatedPodVolumes)
 
 	klet := &Kubelet{
-		hostname:                                hostname,
 		hostnameOverridden:                      len(hostnameOverride) > 0,
-		nodeName:                                nodeName,
 		kubeClient:                              kubeDeps.KubeClient,
 		heartbeatClient:                         kubeDeps.HeartbeatClient,
 		onRepeatedHeartbeatFailure:              kubeDeps.OnHeartbeatFailure,
@@ -804,7 +802,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	if kubeCfg.ServerTLSBootstrap && kubeDeps.TLSOptions != nil && utilfeature.DefaultFeatureGate.Enabled(features.RotateKubeletServerCertificate) {
-		klet.serverCertificateManager, err = kubeletcertificate.NewKubeletServerCertificateManager(klet.kubeClient, kubeCfg, klet.nodeName, klet.getLastObservedNodeAddresses, certDirectory)
+		klet.serverCertificateManager, err = kubeletcertificate.NewKubeletServerCertificateManager(klet.kubeClient, kubeCfg, klet.basicInfo.GetNodeName(), klet.getLastObservedNodeAddresses, certDirectory)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize certificate manager: %v", err)
 		}
@@ -913,7 +911,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	klet.softAdmitHandlers.AddPodAdmitHandler(lifecycle.NewNoNewPrivsAdmitHandler(klet.containerRuntime))
 	klet.softAdmitHandlers.AddPodAdmitHandler(lifecycle.NewProcMountAdmitHandler(klet.containerRuntime))
 
-	klet.nodeLeaseController = nodelease.NewController(klet.clock, klet.heartbeatClient, string(klet.nodeName), kubeCfg.NodeLeaseDurationSeconds, klet.onRepeatedHeartbeatFailure)
+	klet.nodeLeaseController = nodelease.NewController(klet.clock, klet.heartbeatClient, string(klet.basicInfo.GetNodeName()), kubeCfg.NodeLeaseDurationSeconds, klet.onRepeatedHeartbeatFailure)
 
 	// Finally, put the most recent version of the config on the Kubelet, so
 	// people can see how it was configured.
@@ -938,13 +936,9 @@ type serviceLister interface {
 type Kubelet struct {
 	kubeletConfiguration kubeletconfiginternal.KubeletConfiguration
 
-	// hostname is the hostname the kubelet detected or was given via flag/config
-	hostname string
 	// hostnameOverridden indicates the hostname was overridden via flag/config
 	hostnameOverridden bool
 
-	// TODO inject to basic info, don't remove.
-	nodeName        types.NodeName
 	runtimeCache    kubecontainer.RuntimeCache
 	kubeClient      clientset.Interface
 	heartbeatClient clientset.Interface
@@ -1379,7 +1373,7 @@ func (kl *Kubelet) initializeModules() error {
 		collectors.NewVolumeStatsCollector(kl),
 		collectors.NewLogMetricsCollector(kl.StatsProvider.ListPodStats),
 	)
-	metrics.SetNodeName(kl.nodeName)
+	metrics.SetNodeName(kl.basicInfo.GetNodeName())
 	servermetrics.Register()
 
 	// Setup filesystem directories.
@@ -1709,7 +1703,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 		if mirrorPod == nil || deleted {
 			node, err := kl.basicInfo.GetNode()
 			if err != nil || node.DeletionTimestamp != nil {
-				klog.V(4).Infof("No need to create a mirror pod, since node %q has been removed from the cluster", kl.nodeName)
+				klog.V(4).Infof("No need to create a mirror pod, since node %q has been removed from the cluster", kl.basicInfo.GetNodeName())
 			} else {
 				klog.V(4).Infof("Creating a mirror pod for static pod %q", format.Pod(pod))
 				if err := kl.podManager.CreateMirrorPod(pod); err != nil {

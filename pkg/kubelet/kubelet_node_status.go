@@ -84,27 +84,27 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
 	}
 
 	if !apierrors.IsAlreadyExists(err) {
-		klog.Errorf("Unable to register node %q with API server: %v", kl.nodeName, err)
+		klog.Errorf("Unable to register node %q with API server: %v", kl.basicInfo.GetNodeName(), err)
 		return false
 	}
 
-	existingNode, err := kl.kubeClient.CoreV1().Nodes().Get(context.TODO(), string(kl.nodeName), metav1.GetOptions{})
+	existingNode, err := kl.kubeClient.CoreV1().Nodes().Get(context.TODO(), string(kl.basicInfo.GetNodeName()), metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Unable to register node %q with API server: error getting existing node: %v", kl.nodeName, err)
+		klog.Errorf("Unable to register node %q with API server: error getting existing node: %v", kl.basicInfo.GetNodeName(), err)
 		return false
 	}
 	if existingNode == nil {
-		klog.Errorf("Unable to register node %q with API server: no node instance returned", kl.nodeName)
+		klog.Errorf("Unable to register node %q with API server: no node instance returned", kl.basicInfo.GetNodeName())
 		return false
 	}
 
 	originalNode := existingNode.DeepCopy()
 	if originalNode == nil {
-		klog.Errorf("Nil %q node object", kl.nodeName)
+		klog.Errorf("Nil %q node object", kl.basicInfo.GetNodeName())
 		return false
 	}
 
-	klog.Infof("Node %s was previously registered", kl.nodeName)
+	klog.Infof("Node %s was previously registered", kl.basicInfo.GetNodeName())
 
 	// Edge case: the node was previously registered; reconcile
 	// the value of the controller-managed attach-detach
@@ -113,8 +113,8 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
 	requiresUpdate = kl.updateDefaultLabels(node, existingNode) || requiresUpdate
 	requiresUpdate = kl.reconcileExtendedResource(node, existingNode) || requiresUpdate
 	if requiresUpdate {
-		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, existingNode); err != nil {
-			klog.Errorf("Unable to reconcile node %q with API server: error updating node: %v", kl.nodeName, err)
+		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.basicInfo.GetNodeName()), originalNode, existingNode); err != nil {
+			klog.Errorf("Unable to reconcile node %q with API server: error updating node: %v", kl.basicInfo.GetNodeName(), err)
 			return false
 		}
 	}
@@ -258,14 +258,14 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	if tryNumber == 0 {
 		util.FromApiserverCache(&opts)
 	}
-	node, err := kl.heartbeatClient.CoreV1().Nodes().Get(context.TODO(), string(kl.nodeName), opts)
+	node, err := kl.heartbeatClient.CoreV1().Nodes().Get(context.TODO(), string(kl.basicInfo.GetNodeName()), opts)
 	if err != nil {
-		return fmt.Errorf("error getting node %q: %v", kl.nodeName, err)
+		return fmt.Errorf("error getting node %q: %v", kl.basicInfo.GetNodeName(), err)
 	}
 
 	originalNode := node.DeepCopy()
 	if originalNode == nil {
-		return fmt.Errorf("nil %q node object", kl.nodeName)
+		return fmt.Errorf("nil %q node object", kl.basicInfo.GetNodeName())
 	}
 
 	podCIDRChanged := false
@@ -306,7 +306,7 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	}
 
 	// Patch the current status on the API server
-	updatedNode, _, err := nodeutil.PatchNodeStatus(kl.heartbeatClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, node)
+	updatedNode, _, err := nodeutil.PatchNodeStatus(kl.heartbeatClient.CoreV1(), types.NodeName(kl.basicInfo.GetNodeName()), originalNode, node)
 	if err != nil {
 		return err
 	}
@@ -321,10 +321,10 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 // recordNodeStatusEvent records an event of the given type with the given
 // message for the node.
 func (kl *Kubelet) recordNodeStatusEvent(eventType, event string) {
-	klog.V(2).Infof("Recording %s event message for node %s", event, kl.nodeName)
+	klog.V(2).Infof("Recording %s event message for node %s", event, kl.basicInfo.GetNodeName())
 	// TODO: This requires a transaction, either both node status is updated
 	// and event is recorded or neither should happen, see issue #6055.
-	kl.recorder.Eventf(kl.nodeRef, eventType, event, "Node %s status is now: %s", kl.nodeName, event)
+	kl.recorder.Eventf(kl.nodeRef, eventType, event, "Node %s status is now: %s", kl.basicInfo.GetNodeName(), event)
 }
 
 // recordEvent records an event for this node, the Kubelet's nodeRef is passed to the recorder
@@ -372,8 +372,8 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(*v1.Node) error {
 	}
 	var setters []func(n *v1.Node) error
 	setters = append(setters,
-		nodestatus.NodeAddress(kl.nodeIP, kl.nodeIPValidator, kl.hostname, kl.hostnameOverridden, kl.externalCloudProvider, kl.cloud, nodeAddressesFunc),
-		nodestatus.MachineInfo(string(kl.nodeName), kl.maxPods, kl.podsPerCore, kl.GetCachedMachineInfo, kl.containerManager.GetCapacity,
+		nodestatus.NodeAddress(kl.nodeIP, kl.nodeIPValidator, kl.basicInfo.GetHostname(), kl.hostnameOverridden, kl.externalCloudProvider, kl.cloud, nodeAddressesFunc),
+		nodestatus.MachineInfo(string(kl.basicInfo.GetNodeName()), kl.maxPods, kl.podsPerCore, kl.GetCachedMachineInfo, kl.containerManager.GetCapacity,
 			kl.containerManager.GetDevicePluginResourceCapacity, kl.containerManager.GetNodeAllocatableReservation, kl.recordEvent),
 		nodestatus.VersionInfo(kl.cadvisor.VersionInfo, kl.containerRuntime.Type, kl.containerRuntime.Version),
 		nodestatus.DaemonEndpoints(kl.daemonEndpoints),

@@ -134,6 +134,16 @@ func NewBasicInfo(
 	}
 }
 
+// GetHostname Returns the hostname as the kubelet sees it.
+func (b *BasicInfo) GetHostname() string {
+	return b.hostname
+}
+
+// GetHostname Returns the hostname as the kubelet sees it.
+func (b *BasicInfo) GetNodeName() types.NodeName {
+	return b.nodeName
+}
+
 // GetPodDir returns the full path to the per-pod data directory for the
 // specified pod. This directory may not exist if the pod does not exist.
 func (b *BasicInfo) GetPodDir(podUID types.UID) string {

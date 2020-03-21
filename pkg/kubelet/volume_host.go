@@ -221,7 +221,7 @@ func (kvh *kubeletVolumeHost) GetMounter(pluginName string) mount.Interface {
 }
 
 func (kvh *kubeletVolumeHost) GetHostName() string {
-	return kvh.kubelet.hostname
+	return kvh.kubelet.basicInfo.GetHostname()
 }
 
 func (kvh *kubeletVolumeHost) GetHostIP() (net.IP, error) {
@@ -261,7 +261,7 @@ func (kvh *kubeletVolumeHost) GetNodeLabels() (map[string]string, error) {
 }
 
 func (kvh *kubeletVolumeHost) GetNodeName() types.NodeName {
-	return kvh.kubelet.nodeName
+	return kvh.kubelet.basicInfo.GetNodeName()
 }
 
 func (kvh *kubeletVolumeHost) GetEventRecorder() record.EventRecorder {
