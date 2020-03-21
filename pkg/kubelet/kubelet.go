@@ -653,9 +653,9 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		configMapManager = configmap.NewWatchingConfigMapManager(kubeDeps.KubeClient)
 	case kubeletconfiginternal.TTLCacheChangeDetectionStrategy:
 		secretManager = secret.NewCachingSecretManager(
-			kubeDeps.KubeClient, manager.GetObjectTTLFromNodeFunc(klet.GetNode))
+			kubeDeps.KubeClient, manager.GetObjectTTLFromNodeFunc(klet.basicInfo.GetNode))
 		configMapManager = configmap.NewCachingConfigMapManager(
-			kubeDeps.KubeClient, manager.GetObjectTTLFromNodeFunc(klet.GetNode))
+			kubeDeps.KubeClient, manager.GetObjectTTLFromNodeFunc(klet.basicInfo.GetNode))
 	case kubeletconfiginternal.GetChangeDetectionStrategy:
 		secretManager = secret.NewSimpleSecretManager(kubeDeps.KubeClient)
 		configMapManager = configmap.NewSimpleConfigMapManager(kubeDeps.KubeClient)
@@ -718,7 +718,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klet.configMapManager,
 		klet.secretManager,
 		klet.dnsConfigurer,
-		klet.volumeManager,
 		klet.hostutil,
 		klet.subpather,
 		httpClient,
@@ -903,7 +902,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	klet.admitHandlers.AddPodAdmitHandler(klet.containerManager.GetAllocateResourcesPodAdmitHandler())
 
 	criticalPodAdmissionHandler := preemption.NewCriticalPodAdmissionHandler(klet.GetActivePods, killPodNow(klet.podWorkers, kubeDeps.Recorder), kubeDeps.Recorder)
-	klet.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(klet.getNodeAnyWay, criticalPodAdmissionHandler, klet.containerManager.UpdatePluginResources))
+	klet.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(klet.basicInfo.GetNodeAnyWay, criticalPodAdmissionHandler, klet.containerManager.UpdatePluginResources))
 	// apply functional Option's
 	for _, opt := range kubeDeps.Options {
 		opt(klet)
@@ -922,6 +921,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	// Generating the status funcs should be the last thing we do,
 	// since this relies on the rest of the Kubelet having been constructed.
+	// TODO drop it latter.
 	//klet.setNodeStatusFuncs = klet.defaultNodeStatusFuncs()
 
 	klet.basicInfo.NodeStatusFuncs = klet.defaultNodeStatusFuncs()
@@ -1197,6 +1197,7 @@ type Kubelet struct {
 	// easy to test the code.
 	clock clock.Clock
 
+	// TODO remove it directly.
 	// handlers called during the tryUpdateNodeStatus cycle
 	setNodeStatusFuncs []func(*v1.Node) error
 
@@ -1274,6 +1275,11 @@ type Kubelet struct {
 
 	// Handles RuntimeClass objects for the Kubelet.
 	runtimeClassManager *runtimeclass.Manager
+}
+
+// GetBasicInfo return kubelet.basicInfo
+func (kl *Kubelet) GetBasicInfo() *basicinfo.BasicInfo {
+	return kl.basicInfo
 }
 
 // setupDataDirs creates:
@@ -1419,7 +1425,7 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 	// ignore any errors, since if stats collection is not successful, the container manager will fail to start below.
 	kl.StatsProvider.GetCgroupStats("/", true)
 	// Start container manager.
-	node, err := kl.getNodeAnyWay()
+	node, err := kl.basicInfo.GetNodeAnyWay()
 	if err != nil {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
 		klog.Fatalf("Kubelet failed to get node info: %v", err)
@@ -1701,7 +1707,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 			}
 		}
 		if mirrorPod == nil || deleted {
-			node, err := kl.GetNode()
+			node, err := kl.basicInfo.GetNode()
 			if err != nil || node.DeletionTimestamp != nil {
 				klog.V(4).Infof("No need to create a mirror pod, since node %q has been removed from the cluster", kl.nodeName)
 			} else {

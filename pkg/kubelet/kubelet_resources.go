@@ -38,7 +38,7 @@ func (kl *Kubelet) defaultPodLimitsForDownwardAPI(pod *v1.Pod, container *v1.Con
 		return nil, nil, fmt.Errorf("invalid input, pod cannot be nil")
 	}
 
-	node, err := kl.getNodeAnyWay()
+	node, err := kl.basicInfo.GetNodeAnyWay()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to find node object, expected a node")
 	}

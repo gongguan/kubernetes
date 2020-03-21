@@ -35,6 +35,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/volume"
+	"k8s.io/kubernetes/pkg/kubelet/basicinfo"
 )
 
 // Provider hosts methods required by stats handlers.
@@ -100,6 +101,8 @@ type Provider interface {
 	// GetPodByCgroupfs provides the pod that maps to the specified cgroup literal, as well
 	// as whether the pod was found.
 	GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool)
+
+	GetBasicInfo() *basicinfo.BasicInfo
 }
 
 type handler struct {

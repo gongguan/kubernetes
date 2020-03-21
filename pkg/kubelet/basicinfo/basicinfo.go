@@ -160,7 +160,7 @@ func (b *BasicInfo) GetHostIPAnyWay() (net.IP, error) {
 	return utilnode.GetNodeHostIP(node)
 }
 
-// getNodeAnyWay() must return a *v1.Node which is required by RunGeneralPredicates().
+// GetNodeAnyWay() must return a *v1.Node which is required by RunGeneralPredicates().
 // The *v1.Node is obtained as follows:
 // Return kubelet's nodeInfo for this node, except on error or if in standalone mode,
 // in which case return a manufactured nodeInfo representing a node with no pods,
@@ -171,20 +171,20 @@ func (b *BasicInfo) GetNodeAnyWay() (*v1.Node, error) {
 			return n, nil
 		}
 	}
-	return b.initialNode(context.TODO())
+	return b.InitialNode(context.TODO())
 }
 
 // GetNode returns the node info for the configured node name of this Kubelet.
 func (b *BasicInfo) GetNode() (*v1.Node, error) {
 	if b.KubeClient == nil {
-		return b.initialNode(context.TODO())
+		return b.InitialNode(context.TODO())
 	}
 	return b.nodeLister.Get(string(b.nodeName))
 }
 
 // initialNode constructs the initial v1.Node for this Kubelet, incorporating node
 // labels, information from the cloud provider, and Kubelet configuration.
-func (b *BasicInfo) initialNode(ctx context.Context) (*v1.Node, error) {
+func (b *BasicInfo) InitialNode(ctx context.Context) (*v1.Node, error) {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: string(b.nodeName),
@@ -334,7 +334,7 @@ func (b *BasicInfo) initialNode(ctx context.Context) (*v1.Node, error) {
 		}
 	}
 
-	b.setNodeStatus(node)
+	b.SetNodeStatus(node)
 
 	return node, nil
 }
@@ -343,7 +343,7 @@ func (b *BasicInfo) initialNode(ctx context.Context) (*v1.Node, error) {
 // any fields that are currently set.
 // TODO(madhusudancs): Simplify the logic for setting node conditions and
 // refactor the node status condition code out to a different file.
-func (b *BasicInfo) setNodeStatus(node *v1.Node) {
+func (b *BasicInfo) SetNodeStatus(node *v1.Node) {
 	for i, f := range b.NodeStatusFuncs {
 		klog.V(5).Infof("Setting node status at position %v", i)
 		if err := f(node); err != nil {

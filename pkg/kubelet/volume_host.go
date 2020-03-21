@@ -225,11 +225,11 @@ func (kvh *kubeletVolumeHost) GetHostName() string {
 }
 
 func (kvh *kubeletVolumeHost) GetHostIP() (net.IP, error) {
-	return kvh.kubelet.GetHostIP()
+	return kvh.kubelet.basicInfo.GetHostIPAnyWay()
 }
 
 func (kvh *kubeletVolumeHost) GetNodeAllocatable() (v1.ResourceList, error) {
-	node, err := kvh.kubelet.getNodeAnyWay()
+	node, err := kvh.kubelet.basicInfo.GetNodeAnyWay()
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving node: %v", err)
 	}
@@ -253,7 +253,7 @@ func (kvh *kubeletVolumeHost) DeleteServiceAccountTokenFunc() func(podUID types.
 }
 
 func (kvh *kubeletVolumeHost) GetNodeLabels() (map[string]string, error) {
-	node, err := kvh.kubelet.GetNode()
+	node, err := kvh.kubelet.basicInfo.GetNode()
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving node: %v", err)
 	}
