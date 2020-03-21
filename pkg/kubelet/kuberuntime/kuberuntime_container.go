@@ -418,18 +418,22 @@ func (m *kubeGenericRuntimeManager) GetPodCgroupParent(pod *v1.Pod) string {
 	return cgroupParent
 }
 
-// GetExtraSupplementalGroupsForPod backport kubelet.GetExtraSupplementalGroupsForPod which exist in kubelet_getters.go.
-// remove func in kubelet later directly.
+// GetExtraSupplementalGroupsForPod returns a list of the extra
+// supplemental groups for the Pod. These extra supplemental groups come
+// from annotations on persistent volumes that the pod depends on.
 func (m *kubeGenericRuntimeManager) GetExtraSupplementalGroupsForPod(pod *v1.Pod) []int64 {
 	return m.volumeManager.GetExtraSupplementalGroupsForPod(pod)
 }
 
-// GetPodDNS backport kubelet.GetPodDNS which exist in kubelet_network.go
-// remove func in kubelet later directly.
+// GetPodDNS returns DNS settings for the pod.
+// This function is defined in kubecontainer.RuntimeHelper interface so we
+// have to implement it.
 func (m *kubeGenericRuntimeManager) GetPodDNS(pod *v1.Pod) (*runtimeapi.DNSConfig, error) {
 	return m.dnsConfigurer.GetPodDNS(pod)
 }
 
+// makeBlockVolumes maps the raw block devices specified in the path of the container
+// Experimental
 func (m *kubeGenericRuntimeManager) makeBlockVolumes(pod *v1.Pod, container *v1.Container, podVolumes kubecontainer.VolumeMap, blkutil volumepathhandler.BlockVolumePathHandler) ([]kubecontainer.DeviceInfo, error) {
 	var devices []kubecontainer.DeviceInfo
 	for _, device := range container.VolumeDevices {
@@ -461,6 +465,7 @@ func (m *kubeGenericRuntimeManager) makeBlockVolumes(pod *v1.Pod, container *v1.
 	return devices, nil
 }
 
+// Make the environment variables for a pod in the given namespace.
 func (m *kubeGenericRuntimeManager) makeEnvironmentVariables(pod *v1.Pod, container *v1.Container, podIP string, podIPs []string) ([]kubecontainer.EnvVar, error) {
 	//TODO need configmapManager, secretManager
 	if pod.Spec.EnableServiceLinks == nil {
@@ -1063,6 +1068,13 @@ func hostsEntriesFromHostAliases(hostAliases []v1.HostAlias) []byte {
 	return buffer.Bytes()
 }
 
+// enableHostUserNamespace determines if the host user namespace should be used by the container runtime.
+// Returns true if the pod is using a host pid, pic, or network namespace, the pod is using a non-namespaced
+// capability, the pod contains a privileged container, or the pod has a host path volume.
+//
+// NOTE: when if a container shares any namespace with another container it must also share the user namespace
+// or it will not have the correct capabilities in the namespace.  This means that host user namespace
+// is enabled per pod, not per container.
 func (m *kubeGenericRuntimeManager) enableHostUserNamespace(pod *v1.Pod) bool {
 	if kubecontainer.HasPrivilegedContainer(pod) || hasHostNamespace(pod) ||
 		hasHostVolume(pod) || hasNonNamespacedCapability(pod) || m.hasHostMountPVC(pod) {
@@ -1110,6 +1122,7 @@ func (m *kubeGenericRuntimeManager) hasHostMountPVC(pod *v1.Pod) bool {
 	return false
 }
 
+// hasHostNamespace returns true if hostIPC, hostNetwork, or hostPID are set to true.
 func hasHostNamespace(pod *v1.Pod) bool {
 	if pod.Spec.SecurityContext == nil {
 		return false

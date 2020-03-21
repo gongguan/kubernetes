@@ -282,13 +282,6 @@ func (kl *Kubelet) getHostIPAnyWay() (net.IP, error) {
 	return utilnode.GetNodeHostIP(node)
 }
 
-// GetExtraSupplementalGroupsForPod returns a list of the extra
-// supplemental groups for the Pod. These extra supplemental groups come
-// from annotations on persistent volumes that the pod depends on.
-func (kl *Kubelet) GetExtraSupplementalGroupsForPod(pod *v1.Pod) []int64 {
-	return kl.volumeManager.GetExtraSupplementalGroupsForPod(pod)
-}
-
 // getPodVolumePathListFromDisk returns a list of the volume paths by reading the
 // volume directories for the given pod from the disk.
 func (kl *Kubelet) getPodVolumePathListFromDisk(podUID types.UID) ([]string, error) {
