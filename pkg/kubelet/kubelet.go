@@ -570,6 +570,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		hostname,
 		nodeName,
 		clock.RealClock{},
+		registerNode,
 		rootDirectory,
 		kubeDeps.KubeClient,
 		masterServiceNamespace,
@@ -594,21 +595,13 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		basicInfo:                               basicInfo,
 		resyncInterval:                          kubeCfg.SyncFrequency.Duration,
 		sourcesReady:                            config.NewSourcesReady(kubeDeps.PodConfig.SeenAllSources),
-		registerNode:                            registerNode,
-		registerWithTaints:                      registerWithTaints,
-		registerSchedulable:                     registerSchedulable,
 		dnsConfigurer:                           dns.NewConfigurer(kubeDeps.Recorder, nodeRef, parsedNodeIP, clusterDNS, kubeCfg.ClusterDomain, kubeCfg.ResolverConfig),
-		serviceLister:                           serviceLister,
-		nodeLister:                              nodeLister,
-		masterServiceNamespace:                  masterServiceNamespace,
 		streamingConnectionIdleTimeout:          kubeCfg.StreamingConnectionIdleTimeout.Duration,
 		recorder:                                kubeDeps.Recorder,
 		cadvisor:                                kubeDeps.CAdvisorInterface,
 		cloud:                                   kubeDeps.Cloud,
 		externalCloudProvider:                   externalCloudProvider,
-		providerID:                              providerID,
 		nodeRef:                                 nodeRef,
-		nodeLabels:                              nodeLabels,
 		nodeStatusUpdateFrequency:               kubeCfg.NodeStatusUpdateFrequency.Duration,
 		nodeStatusReportFrequency:               kubeCfg.NodeStatusReportFrequency.Duration,
 		os:                                      kubeDeps.OSInterface,
@@ -628,13 +621,11 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		nodeIP:                                  parsedNodeIP,
 		nodeIPValidator:                         validateNodeIP,
 		clock:                                   clock.RealClock{},
-		enableControllerAttachDetach:            kubeCfg.EnableControllerAttachDetach,
 		iptClient:                               utilipt.New(utilexec.New(), protocol),
 		makeIPTablesUtilChains:                  kubeCfg.MakeIPTablesUtilChains,
 		iptablesMasqueradeBit:                   int(kubeCfg.IPTablesMasqueradeBit),
 		iptablesDropBit:                         int(kubeCfg.IPTablesDropBit),
 		experimentalHostUserNamespaceDefaulting: experimentalHostUserNamespaceDefaulting,
-		keepTerminatedPodVolumes:                keepTerminatedPodVolumes,
 		nodeStatusMaxImages:                     nodeStatusMaxImages,
 	}
 
@@ -976,34 +967,8 @@ type Kubelet struct {
 	// cAdvisor used for container information.
 	cadvisor cadvisor.Interface
 
-	// Set to true to have the node register itself with the apiserver.
-	registerNode bool
-	// TODO remove it directly
-	// List of taints to add to a node object when the kubelet registers itself.
-	registerWithTaints []api.Taint
-	// TODO remove it directly
-	// Set to true to have the node register itself as schedulable.
-	registerSchedulable bool
-	// for internal book keeping; access only from within registerWithApiserver
-	registrationCompleted bool
-
 	// dnsConfigurer is used for setting up DNS resolver configuration when launching pods.
 	dnsConfigurer *dns.Configurer
-
-	// TODO remove it, move to basicinfo.
-	// masterServiceNamespace is the namespace that the master service is exposed in.
-	masterServiceNamespace string
-
-	// TODO remove it, move to basicinfo.
-	// serviceLister knows how to list services
-	serviceLister serviceLister
-	// TODO remove it, move to basicinfo.
-	// nodeLister knows how to list nodes
-	nodeLister corelisters.NodeLister
-
-	// TODO remove it, move to basicinfo.
-	// a list of node labels to register
-	nodeLabels map[string]string
 
 	// Last timestamp when runtime responded on ping.
 	// Mutex is used to protect this value.
@@ -1181,17 +1146,9 @@ type Kubelet struct {
 	// use this function to validate the kubelet nodeIP
 	nodeIPValidator func(net.IP) error
 
-	// TODO remove it directly.
-	// If non-nil, this is a unique identifier for the node in an external database, eg. cloudprovider
-	providerID string
-
 	// clock is an interface that provides time related functionality in a way that makes it
 	// easy to test the code.
 	clock clock.Clock
-
-	// TODO remove it directly.
-	// handlers called during the tryUpdateNodeStatus cycle
-	setNodeStatusFuncs []func(*v1.Node) error
 
 	lastNodeUnschedulableLock sync.Mutex
 	// maintains Node.Spec.Unschedulable value from previous run of tryUpdateNodeStatus()
@@ -1215,12 +1172,6 @@ type Kubelet struct {
 
 	// the number of allowed pods per core
 	podsPerCore int
-
-	// TODO remove it directly.
-	// enableControllerAttachDetach indicates the Attach/Detach controller
-	// should manage attachment/detachment of volumes scheduled to this node,
-	// and disable kubelet from executing any attach/detach operations
-	enableControllerAttachDetach bool
 
 	// trigger deleting containers in a pod
 	containerDeletor *podContainerDeletor
@@ -1253,10 +1204,6 @@ type Kubelet struct {
 
 	// StatsProvider provides the node and the container stats.
 	*stats.StatsProvider
-
-	// This flag, if set, instructs the kubelet to keep volumes from terminated pods mounted to the node.
-	// This can be useful for debugging volume related issues.
-	keepTerminatedPodVolumes bool // DEPRECATED
 
 	// pluginmanager runs a set of asynchronous loops that figure out which
 	// plugins need to be registered/unregistered based on this node and makes it so.

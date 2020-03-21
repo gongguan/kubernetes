@@ -82,7 +82,7 @@ func newFakeKubeRuntimeManager(runtimeService internalapi.RuntimeService, imageS
 		containerRefManager: kubecontainer.NewRefManager(),
 		machineInfo:         machineInfo,
 		osInterface:         osInterface,
-		runtimeHelper:       runtimeHelper,
+		//runtimeHelper:       runtimeHelper,
 		runtimeService:      runtimeService,
 		imageService:        imageService,
 		keyring:             keyring,

@@ -104,10 +104,6 @@ type kubeGenericRuntimeManager struct {
 	// Runner of lifecycle events.
 	runner kubecontainer.HandlerRunner
 
-	// TODO drop it at last.
-	// RuntimeHelper that wraps kubelet to generate runtime container options.
-	runtimeHelper kubecontainer.RuntimeHelper
-
 	containerManager cm.ContainerManager
 
 	dnsConfigurer *dns.Configurer
@@ -120,7 +116,7 @@ type kubeGenericRuntimeManager struct {
 
 	volumeManager volumemanager.VolumeManager
 
-	// TODO init in kubelet and import it.
+	// kubelet basicInfo
 	basicInfo *basicinfo.BasicInfo
 
 	// hostutil to interact with filesystems

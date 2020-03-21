@@ -46,6 +46,12 @@ type BasicInfo struct {
 	// easy to test the code.
 	clock clock.Clock
 
+	// RegisterNode Set to true means node register itself with the apiserver.
+	RegisterNode bool
+
+	// for internal book keeping; access only from within registerWithApiserver
+	RegistrationCompleted bool
+
 	rootDirectory   string
 
 	KubeClient clientset.Interface
@@ -87,15 +93,16 @@ type BasicInfo struct {
 	// handlers called during the tryUpdateNodeStatus cycle
 	NodeStatusFuncs []func(*v1.Node) error
 
-	// This flag, if set, instructs the kubelet to keep volumes from terminated pods mounted to the node.
+	// KeepTerminatedPodVolumes if set, instructs the kubelet to keep volumes from terminated pods mounted to the node.
 	// This can be useful for debugging volume related issues.
-	keepTerminatedPodVolumes bool // DEPRECATED
+	KeepTerminatedPodVolumes bool // DEPRECATED
 }
 
 func NewBasicInfo(
 	hostname string,
 	nodeName types.NodeName,
 	clock clock.Clock,
+	registerNode bool,
 	rootDirectory string,
 	kubeClient clientset.Interface,
 	masterServiceNamespace string,
@@ -116,6 +123,7 @@ func NewBasicInfo(
 		hostname: hostname,
 		nodeName: nodeName,
 		clock:    clock,
+		RegisterNode: registerNode,
 		rootDirectory: rootDirectory,
 		KubeClient: kubeClient,
 		MasterServiceNamespace: masterServiceNamespace,
@@ -130,7 +138,7 @@ func NewBasicInfo(
 		registerWithTaints: registerWithTaints,
 		enableControllerAttachDetach: enableControllerAttachDetach,
 		ExperimentalHostUserNamespaceDefaulting: experimentalHostUserNamespaceDefaulting,
-		keepTerminatedPodVolumes: keepTerminatedPodVolumes,
+		KeepTerminatedPodVolumes: keepTerminatedPodVolumes,
 	}
 }
 
@@ -259,7 +267,7 @@ func (b *BasicInfo) InitialNode(ctx context.Context) (*v1.Node, error) {
 		klog.Infof("Controller attach/detach is disabled for this node; Kubelet will attach and detach volumes")
 	}
 
-	if b.keepTerminatedPodVolumes {
+	if b.KeepTerminatedPodVolumes {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)
 		}
