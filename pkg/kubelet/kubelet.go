@@ -866,6 +866,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		experimentalCheckNodeCapabilitiesBeforeMount,
 		keepTerminatedPodVolumes,
 		volumepathhandler.NewBlockVolumePathHandler())
+	runtime.SetVolumeManager(klet.volumeManager)
 
 	klet.reasonCache = NewReasonCache()
 	klet.workQueue = queue.NewBasicWorkQueue(klet.clock)
@@ -2308,7 +2309,8 @@ func (kl *Kubelet) cleanUpContainersInPod(podID types.UID, exitedContainerID str
 func (kl *Kubelet) fastStatusUpdateOnce() {
 	for {
 		time.Sleep(100 * time.Millisecond)
-		node, err := kl.GetNode()
+		//node, err := kl.GetNode()
+		node, err := kl.basicInfo.GetNode()
 		if err != nil {
 			klog.Errorf(err.Error())
 			continue

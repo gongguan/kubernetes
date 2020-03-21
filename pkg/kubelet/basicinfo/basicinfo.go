@@ -174,6 +174,14 @@ func (b *BasicInfo) GetNodeAnyWay() (*v1.Node, error) {
 	return b.initialNode(context.TODO())
 }
 
+// GetNode returns the node info for the configured node name of this Kubelet.
+func (b *BasicInfo) GetNode() (*v1.Node, error) {
+	if b.KubeClient == nil {
+		return b.initialNode(context.TODO())
+	}
+	return b.nodeLister.Get(string(b.nodeName))
+}
+
 // initialNode constructs the initial v1.Node for this Kubelet, incorporating node
 // labels, information from the cloud provider, and Kubelet configuration.
 func (b *BasicInfo) initialNode(ctx context.Context) (*v1.Node, error) {

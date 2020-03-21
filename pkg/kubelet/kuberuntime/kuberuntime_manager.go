@@ -170,6 +170,7 @@ type KubeGenericRuntime interface {
 	kubecontainer.Runtime
 	kubecontainer.StreamingRuntime
 	kubecontainer.ContainerCommandRunner
+	SetVolumeManager(volumeManager volumemanager.VolumeManager)
 }
 
 // LegacyLogProvider gives the ability to use unsupported docker log drivers (e.g. journald)
@@ -283,6 +284,10 @@ func NewKubeGenericRuntimeManager(
 	)
 
 	return kubeRuntimeManager, nil
+}
+
+func (m *kubeGenericRuntimeManager) SetVolumeManager(volumeManager volumemanager.VolumeManager) {
+	m.volumeManager = volumeManager
 }
 
 // Type returns the type of the container runtime.
