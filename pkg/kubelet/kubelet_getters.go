@@ -206,6 +206,12 @@ func (kl *Kubelet) GetHostname() string {
 	return kl.hostname
 }
 
+// remove it when kubelet no more injected to ResourceAnalyzer.
+// GetNode returns the node info for the configured node name of this Kubelet.
+func (kl *Kubelet) GetNode() (*v1.Node, error) {
+	return kl.basicInfo.GetNode()
+}
+
 // getRuntime returns the current Runtime implementation in use by the kubelet.
 func (kl *Kubelet) getRuntime() kubecontainer.Runtime {
 	return kl.containerRuntime
