@@ -784,7 +784,7 @@ func (kl *Kubelet) podFieldSelectorRuntimeValue(fs *v1.ObjectFieldSelector, pod 
 	case "spec.serviceAccountName":
 		return pod.Spec.ServiceAccountName, nil
 	case "status.hostIP":
-		hostIP, err := kl.getHostIPAnyWay()
+		hostIP, err := kl.nodeInfo.GetHostIPAnyWay()
 		if err != nil {
 			return "", err
 		}
@@ -1388,7 +1388,7 @@ func (kl *Kubelet) generateAPIPodStatus(pod *v1.Pod, podStatus *kubecontainer.Po
 	})
 
 	if kl.kubeClient != nil {
-		hostIP, err := kl.getHostIPAnyWay()
+		hostIP, err := kl.nodeInfo.GetHostIPAnyWay()
 		if err != nil {
 			klog.V(4).Infof("Cannot get host IP: %v", err)
 		} else {

@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
+	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
 	statstest "k8s.io/kubernetes/pkg/kubelet/server/stats/testing"
 )
 
@@ -52,8 +53,8 @@ func TestSummaryProvider(t *testing.T) {
 	assert := assert.New(t)
 
 	mockStatsProvider := new(statstest.StatsProvider)
+	mockNodeInfoProvider := new(nodeinfo.FakeNodeInfo)
 	mockStatsProvider.
-		On("GetNode").Return(node, nil).
 		On("GetNodeConfig").Return(nodeConfig).
 		On("GetPodCgroupRoot").Return(cgroupRoot).
 		On("ListPodStats").Return(podStats, nil).
@@ -62,8 +63,9 @@ func TestSummaryProvider(t *testing.T) {
 		On("RootFsStats").Return(rootFsStats, nil).
 		On("RlimitStats").Return(nil, nil).
 		On("GetCgroupStats", "/", true).Return(cgroupStatsMap["/"].cs, cgroupStatsMap["/"].ns, nil)
+	mockNodeInfoProvider.On("InitialNode").Return(node, nil)
 
-	provider := NewSummaryProvider(mockStatsProvider)
+	provider := NewSummaryProvider(mockNodeInfoProvider, mockStatsProvider)
 	summary, err := provider.Get(true)
 	assert.NoError(err)
 

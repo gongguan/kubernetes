@@ -72,11 +72,20 @@ func TestRunOnce(t *testing.T) {
 		t.Fatalf("can't make a temp rootdir %v", err)
 	}
 	defer os.RemoveAll(basePath)
+
+	nodeInfo := newTestNodeInfo(
+		testKubeletHostname,
+		testKubeletHostname,
+		clock.RealClock{},
+		&fake.Clientset{},
+		testNodeLister{},
+	)
+
 	kb := &Kubelet{
+		nodeInfo:         nodeInfo,
 		rootDirectory:    basePath,
 		recorder:         &record.FakeRecorder{},
 		cadvisor:         cadvisor,
-		nodeLister:       testNodeLister{},
 		statusManager:    status.NewManager(nil, podManager, &statustest.FakePodDeletionSafetyProvider{}),
 		podManager:       podManager,
 		os:               &containertest.FakeOS{},
@@ -84,8 +93,6 @@ func TestRunOnce(t *testing.T) {
 		reasonCache:      NewReasonCache(),
 		clock:            clock.RealClock{},
 		kubeClient:       &fake.Clientset{},
-		hostname:         testKubeletHostname,
-		nodeName:         testKubeletHostname,
 		runtimeState:     newRuntimeState(time.Second),
 		hostutil:         hostutil.NewFakeHostUtil(nil),
 	}
@@ -99,7 +106,7 @@ func TestRunOnce(t *testing.T) {
 	}
 	kb.volumeManager = volumemanager.NewVolumeManager(
 		true,
-		kb.nodeName,
+		kb.nodeInfo.GetNodeName(),
 		kb.podManager,
 		kb.statusManager,
 		kb.kubeClient,
@@ -115,11 +122,11 @@ func TestRunOnce(t *testing.T) {
 
 	// TODO: Factor out "StatsProvider" from Kubelet so we don't have a cyclic dependency
 	volumeStatsAggPeriod := time.Second * 10
-	kb.resourceAnalyzer = stats.NewResourceAnalyzer(kb, volumeStatsAggPeriod)
+	kb.resourceAnalyzer = stats.NewResourceAnalyzer(nodeInfo, kb, volumeStatsAggPeriod)
 	nodeRef := &v1.ObjectReference{
 		Kind:      "Node",
-		Name:      string(kb.nodeName),
-		UID:       types.UID(kb.nodeName),
+		Name:      string(kb.nodeInfo.GetNodeName()),
+		UID:       types.UID(kb.nodeInfo.GetNodeName()),
 		Namespace: "",
 	}
 	fakeKillPodFunc := func(pod *v1.Pod, podStatus v1.PodStatus, gracePeriodOverride *int64) error {

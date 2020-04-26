@@ -30,11 +30,11 @@ import (
 func TestPodResourceLimitsDefaulting(t *testing.T) {
 	tk := newTestKubelet(t, true)
 	defer tk.Cleanup()
-	tk.kubelet.nodeLister = &testNodeLister{
+	nodeLister := &testNodeLister{
 		nodes: []*v1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: string(tk.kubelet.nodeName),
+					Name: string(tk.kubelet.nodeInfo.GetNodeName()),
 				},
 				Status: v1.NodeStatus{
 					Allocatable: v1.ResourceList{
@@ -45,6 +45,7 @@ func TestPodResourceLimitsDefaulting(t *testing.T) {
 			},
 		},
 	}
+	tk.kubelet.nodeInfo.SetNodeLister(nodeLister)
 	cases := []struct {
 		pod      *v1.Pod
 		expected *v1.Pod

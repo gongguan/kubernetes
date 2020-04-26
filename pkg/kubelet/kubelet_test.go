@@ -38,7 +38,9 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
@@ -52,6 +54,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/logs"
 	"k8s.io/kubernetes/pkg/kubelet/network/dns"
+	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
 	"k8s.io/kubernetes/pkg/kubelet/pleg"
 	"k8s.io/kubernetes/pkg/kubelet/pluginmanager"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
@@ -137,6 +140,19 @@ func newTestKubelet(t *testing.T, controllerAttachDetachEnabled bool) *TestKubel
 	return newTestKubeletWithImageList(t, imageList, controllerAttachDetachEnabled, true /*initFakeVolumePlugin*/)
 }
 
+func newTestNodeInfo(
+	hostname string,
+	nodeName types.NodeName,
+	clock clock.Clock,
+	kubeClient clientset.Interface,
+	nodeLister corelisters.NodeLister,
+) nodeinfo.Provider {
+	return nodeinfo.NewNodeInfo(
+		hostname, false, nodeName, nil, clock, false,
+		kubeClient, nil, nil, 0, 0, nodeLister,
+		"", false, nil, false, nil, false, false)
+}
+
 func newTestKubeletWithImageList(
 	t *testing.T,
 	imageList []kubecontainer.Image,
@@ -165,8 +181,6 @@ func newTestKubeletWithImageList(
 	kubelet.hostutil = hostutil.NewFakeHostUtil(nil)
 	kubelet.subpather = &subpath.FakeSubpath{}
 
-	kubelet.hostname = testKubeletHostname
-	kubelet.nodeName = types.NodeName(testKubeletHostname)
 	kubelet.runtimeState = newRuntimeState(maxWaitForContainerRuntime)
 	kubelet.runtimeState.setNetworkState(nil)
 	if tempDir, err := ioutil.TempDir("", "kubelet_test."); err != nil {
@@ -180,11 +194,11 @@ func newTestKubeletWithImageList(
 	kubelet.sourcesReady = config.NewSourcesReady(func(_ sets.String) bool { return true })
 	kubelet.masterServiceNamespace = metav1.NamespaceDefault
 	kubelet.serviceLister = testServiceLister{}
-	kubelet.nodeLister = testNodeLister{
+	nodeLister := testNodeLister{
 		nodes: []*v1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: string(kubelet.nodeName),
+					Name: string(testKubeletHostname),
 				},
 				Status: v1.NodeStatus{
 					Conditions: []v1.NodeCondition{
@@ -205,7 +219,17 @@ func newTestKubeletWithImageList(
 			},
 		},
 	}
-	kubelet.recorder = fakeRecorder
+
+	fakeClock := clock.NewFakeClock(time.Now())
+	nodeInfo := newTestNodeInfo(
+		testKubeletHostname,
+		types.NodeName(testKubeletHostname),
+		fakeClock,
+		fakeKubeClient,
+		nodeLister,
+	)
+	kubelet.nodeInfo = nodeInfo
+
 	if err := kubelet.setupDataDirs(); err != nil {
 		t.Fatalf("can't initialize kubelet data dirs: %v", err)
 	}
@@ -246,7 +270,7 @@ func newTestKubeletWithImageList(
 	}
 
 	volumeStatsAggPeriod := time.Second * 10
-	kubelet.resourceAnalyzer = serverstats.NewResourceAnalyzer(kubelet, volumeStatsAggPeriod)
+	kubelet.resourceAnalyzer = serverstats.NewResourceAnalyzer(kubelet.nodeInfo, kubelet, volumeStatsAggPeriod)
 
 	kubelet.StatsProvider = stats.NewCadvisorStatsProvider(
 		kubelet.cadvisor,
@@ -275,7 +299,6 @@ func newTestKubeletWithImageList(
 	assert.NoError(t, err)
 	kubelet.containerGC = containerGC
 
-	fakeClock := clock.NewFakeClock(time.Now())
 	kubelet.backOff = flowcontrol.NewBackOff(time.Second, time.Minute)
 	kubelet.backOff.Clock = fakeClock
 	kubelet.podKillingCh = make(chan *kubecontainer.PodPair, 20)
@@ -287,8 +310,8 @@ func newTestKubeletWithImageList(
 
 	nodeRef := &v1.ObjectReference{
 		Kind:      "Node",
-		Name:      string(kubelet.nodeName),
-		UID:       types.UID(kubelet.nodeName),
+		Name:      string(kubelet.nodeInfo.GetNodeName()),
+		UID:       types.UID(kubelet.nodeInfo.GetNodeName()),
 		Namespace: "",
 	}
 	// setup eviction manager
@@ -297,7 +320,7 @@ func newTestKubeletWithImageList(
 	kubelet.evictionManager = evictionManager
 	kubelet.admitHandlers.AddPodAdmitHandler(evictionAdmitHandler)
 	// Add this as cleanup predicate pod admitter
-	kubelet.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(kubelet.getNodeAnyWay, lifecycle.NewAdmissionFailureHandlerStub(), kubelet.containerManager.UpdatePluginResources))
+	kubelet.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(kubelet.nodeInfo.GetNodeAnyWay, lifecycle.NewAdmissionFailureHandlerStub(), kubelet.containerManager.UpdatePluginResources))
 
 	allPlugins := []volume.VolumePlugin{}
 	plug := &volumetest.FakeVolumePlugin{PluginName: "fake", Host: nil}
@@ -316,7 +339,7 @@ func newTestKubeletWithImageList(
 
 	kubelet.volumeManager = kubeletvolume.NewVolumeManager(
 		controllerAttachDetachEnabled,
-		kubelet.nodeName,
+		kubelet.nodeInfo.GetNodeName(),
 		kubelet.podManager,
 		kubelet.statusManager,
 		fakeKubeClient,
@@ -334,7 +357,7 @@ func newTestKubeletWithImageList(
 		kubelet.getPluginsRegistrationDir(), /* sockDir */
 		kubelet.recorder,
 	)
-	kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
+	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
 
 	// enable active deadline handler
 	activeDeadlineHandler, err := newActiveDeadlineHandler(kubelet.statusManager, kubelet.recorder, kubelet.clock)
@@ -457,9 +480,9 @@ func TestHandlePortConflicts(t *testing.T) {
 	defer testKubelet.Cleanup()
 	kl := testKubelet.kubelet
 
-	kl.nodeLister = testNodeLister{nodes: []*v1.Node{
+	nodeLister := testNodeLister{nodes: []*v1.Node{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: string(kl.nodeName)},
+			ObjectMeta: metav1.ObjectMeta{Name: string(kl.nodeInfo.GetNodeName())},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourcePods: *resource.NewQuantity(110, resource.DecimalSI),
@@ -467,6 +490,7 @@ func TestHandlePortConflicts(t *testing.T) {
 			},
 		},
 	}}
+	kl.nodeInfo.SetNodeLister(nodeLister)
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -478,7 +502,7 @@ func TestHandlePortConflicts(t *testing.T) {
 	testClusterDNSDomain := "TEST"
 	kl.dnsConfigurer = dns.NewConfigurer(recorder, nodeRef, nil, nil, testClusterDNSDomain, "")
 
-	spec := v1.PodSpec{NodeName: string(kl.nodeName), Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 80}}}}}
+	spec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()), Containers: []v1.Container{{Ports: []v1.ContainerPort{{HostPort: 80}}}}}
 	pods := []*v1.Pod{
 		podWithUIDNameNsSpec("123456789", "newpod", "foo", spec),
 		podWithUIDNameNsSpec("987654321", "oldpod", "foo", spec),
@@ -503,7 +527,7 @@ func TestHandleHostNameConflicts(t *testing.T) {
 	defer testKubelet.Cleanup()
 	kl := testKubelet.kubelet
 
-	kl.nodeLister = testNodeLister{nodes: []*v1.Node{
+	nodeLister := testNodeLister{nodes: []*v1.Node{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "127.0.0.1"},
 			Status: v1.NodeStatus{
@@ -513,6 +537,7 @@ func TestHandleHostNameConflicts(t *testing.T) {
 			},
 		},
 	}}
+	kl.nodeInfo.SetNodeLister(nodeLister)
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -555,7 +580,7 @@ func TestHandleNodeSelector(t *testing.T) {
 			},
 		},
 	}
-	kl.nodeLister = testNodeLister{nodes: nodes}
+	kl.nodeInfo.SetNodeLister(testNodeLister{nodes: nodes})
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -595,7 +620,7 @@ func TestHandleMemExceeded(t *testing.T) {
 				v1.ResourcePods:   *resource.NewQuantity(40, resource.DecimalSI),
 			}}},
 	}
-	kl.nodeLister = testNodeLister{nodes: nodes}
+	kl.nodeInfo.SetNodeLister(testNodeLister{nodes: nodes})
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -607,7 +632,7 @@ func TestHandleMemExceeded(t *testing.T) {
 	testClusterDNSDomain := "TEST"
 	kl.dnsConfigurer = dns.NewConfigurer(recorder, nodeRef, nil, nil, testClusterDNSDomain, "")
 
-	spec := v1.PodSpec{NodeName: string(kl.nodeName),
+	spec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()),
 		Containers: []v1.Container{{Resources: v1.ResourceRequirements{
 			Requests: v1.ResourceList{
 				v1.ResourceMemory: resource.MustParse("90"),
@@ -656,7 +681,7 @@ func TestHandlePluginResources(t *testing.T) {
 				v1.ResourcePods:  allowedPodQuantity,
 			}}},
 	}
-	kl.nodeLister = testNodeLister{nodes: nodes}
+	kl.nodeInfo.SetNodeLister(testNodeLister{nodes: nodes})
 
 	updatePluginResourcesFunc := func(node *schedulerframework.NodeInfo, attrs *lifecycle.PodAdmitAttributes) error {
 		// Maps from resourceName to the value we use to set node.allocatableResource[resourceName].
@@ -689,7 +714,7 @@ func TestHandlePluginResources(t *testing.T) {
 
 	// add updatePluginResourcesFunc to admission handler, to test it's behavior.
 	kl.admitHandlers = lifecycle.PodAdmitHandlers{}
-	kl.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(kl.getNodeAnyWay, lifecycle.NewAdmissionFailureHandlerStub(), updatePluginResourcesFunc))
+	kl.admitHandlers.AddPodAdmitHandler(lifecycle.NewPredicateAdmitHandler(kl.nodeInfo.GetNodeAnyWay, lifecycle.NewAdmissionFailureHandlerStub(), updatePluginResourcesFunc))
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -703,7 +728,7 @@ func TestHandlePluginResources(t *testing.T) {
 
 	// pod requiring adjustedResource can be successfully allocated because updatePluginResourcesFunc
 	// adjusts node.allocatableResource for this resource to a sufficient value.
-	fittingPodSpec := v1.PodSpec{NodeName: string(kl.nodeName),
+	fittingPodSpec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()),
 		Containers: []v1.Container{{Resources: v1.ResourceRequirements{
 			Limits: v1.ResourceList{
 				adjustedResource: resourceQuantity2,
@@ -715,7 +740,7 @@ func TestHandlePluginResources(t *testing.T) {
 	}
 	// pod requiring emptyResource (extended resources with 0 allocatable) will
 	// not pass PredicateAdmit.
-	emptyPodSpec := v1.PodSpec{NodeName: string(kl.nodeName),
+	emptyPodSpec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()),
 		Containers: []v1.Container{{Resources: v1.ResourceRequirements{
 			Limits: v1.ResourceList{
 				emptyResource: resourceQuantity2,
@@ -730,7 +755,7 @@ func TestHandlePluginResources(t *testing.T) {
 	// Extended resources missing in node status are ignored in PredicateAdmit.
 	// This is required to support extended resources that are not managed by
 	// device plugin, such as cluster-level resources.
-	missingPodSpec := v1.PodSpec{NodeName: string(kl.nodeName),
+	missingPodSpec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()),
 		Containers: []v1.Container{{Resources: v1.ResourceRequirements{
 			Limits: v1.ResourceList{
 				missingResource: resourceQuantity2,
@@ -741,7 +766,7 @@ func TestHandlePluginResources(t *testing.T) {
 		}}},
 	}
 	// pod requiring failedResource will fail with the resource failed to be allocated.
-	failedPodSpec := v1.PodSpec{NodeName: string(kl.nodeName),
+	failedPodSpec := v1.PodSpec{NodeName: string(kl.nodeInfo.GetNodeName()),
 		Containers: []v1.Container{{Resources: v1.ResourceRequirements{
 			Limits: v1.ResourceList{
 				failedResource: resourceQuantity1,
@@ -1806,9 +1831,9 @@ func TestHandlePodAdditionsInvokesPodAdmitHandlers(t *testing.T) {
 	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
 	defer testKubelet.Cleanup()
 	kl := testKubelet.kubelet
-	kl.nodeLister = testNodeLister{nodes: []*v1.Node{
+	nodeLister := testNodeLister{nodes: []*v1.Node{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: string(kl.nodeName)},
+			ObjectMeta: metav1.ObjectMeta{Name: string(kl.nodeInfo.GetNodeName())},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourcePods: *resource.NewQuantity(110, resource.DecimalSI),
@@ -1816,6 +1841,7 @@ func TestHandlePodAdditionsInvokesPodAdmitHandlers(t *testing.T) {
 			},
 		},
 	}}
+	kl.nodeInfo.SetNodeLister(nodeLister)
 
 	pods := []*v1.Pod{
 		{

@@ -17,10 +17,8 @@ limitations under the License.
 package kubelet
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"path/filepath"
 
 	cadvisorapiv1 "github.com/google/cadvisor/info/v1"
@@ -34,7 +32,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubelettypes "k8s.io/kubernetes/pkg/kubelet/types"
-	utilnode "k8s.io/kubernetes/pkg/util/node"
 )
 
 // getRootDir returns the full path to the directory under which kubelet can
@@ -219,34 +216,12 @@ func (kl *Kubelet) GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool) {
 
 // GetHostname Returns the hostname as the kubelet sees it.
 func (kl *Kubelet) GetHostname() string {
-	return kl.hostname
+	return kl.nodeInfo.GetHostname()
 }
 
 // getRuntime returns the current Runtime implementation in use by the kubelet.
 func (kl *Kubelet) getRuntime() kubecontainer.Runtime {
 	return kl.containerRuntime
-}
-
-// GetNode returns the node info for the configured node name of this Kubelet.
-func (kl *Kubelet) GetNode() (*v1.Node, error) {
-	if kl.kubeClient == nil {
-		return kl.initialNode(context.TODO())
-	}
-	return kl.nodeLister.Get(string(kl.nodeName))
-}
-
-// getNodeAnyWay() must return a *v1.Node which is required by RunGeneralPredicates().
-// The *v1.Node is obtained as follows:
-// Return kubelet's nodeInfo for this node, except on error or if in standalone mode,
-// in which case return a manufactured nodeInfo representing a node with no pods,
-// zero capacity, and the default labels.
-func (kl *Kubelet) getNodeAnyWay() (*v1.Node, error) {
-	if kl.kubeClient != nil {
-		if n, err := kl.nodeLister.Get(string(kl.nodeName)); err == nil {
-			return n, nil
-		}
-	}
-	return kl.initialNode(context.TODO())
 }
 
 // GetNodeConfig returns the container manager node config.
@@ -257,25 +232,6 @@ func (kl *Kubelet) GetNodeConfig() cm.NodeConfig {
 // GetPodCgroupRoot returns the listeral cgroupfs value for the cgroup containing all pods
 func (kl *Kubelet) GetPodCgroupRoot() string {
 	return kl.containerManager.GetPodCgroupRoot()
-}
-
-// GetHostIP returns host IP or nil in case of error.
-func (kl *Kubelet) GetHostIP() (net.IP, error) {
-	node, err := kl.GetNode()
-	if err != nil {
-		return nil, fmt.Errorf("cannot get node: %v", err)
-	}
-	return utilnode.GetNodeHostIP(node)
-}
-
-// getHostIPAnyway attempts to return the host IP from kubelet's nodeInfo, or
-// the initialNode.
-func (kl *Kubelet) getHostIPAnyWay() (net.IP, error) {
-	node, err := kl.getNodeAnyWay()
-	if err != nil {
-		return nil, err
-	}
-	return utilnode.GetNodeHostIP(node)
 }
 
 // GetExtraSupplementalGroupsForPod returns a list of the extra

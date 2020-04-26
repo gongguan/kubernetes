@@ -23,6 +23,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
+	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 )
 
@@ -37,6 +38,7 @@ type SummaryProvider interface {
 
 // summaryProviderImpl implements the SummaryProvider interface.
 type summaryProviderImpl struct {
+	nodeInfo nodeinfo.Provider
 	// kubeletCreationTime is the time at which the summaryProvider was created.
 	kubeletCreationTime metav1.Time
 	// systemBootTime is the time at which the system was started
@@ -49,7 +51,7 @@ var _ SummaryProvider = &summaryProviderImpl{}
 
 // NewSummaryProvider returns a SummaryProvider using the stats provided by the
 // specified statsProvider.
-func NewSummaryProvider(statsProvider Provider) SummaryProvider {
+func NewSummaryProvider(nodeInfo nodeinfo.Provider, statsProvider Provider) SummaryProvider {
 	kubeletCreationTime := metav1.Now()
 	bootTime, err := util.GetBootTime()
 	if err != nil {
@@ -58,6 +60,7 @@ func NewSummaryProvider(statsProvider Provider) SummaryProvider {
 	}
 
 	return &summaryProviderImpl{
+		nodeInfo:            nodeInfo,
 		kubeletCreationTime: kubeletCreationTime,
 		systemBootTime:      metav1.NewTime(bootTime),
 		provider:            statsProvider,
@@ -67,7 +70,7 @@ func NewSummaryProvider(statsProvider Provider) SummaryProvider {
 func (sp *summaryProviderImpl) Get(updateStats bool) (*statsapi.Summary, error) {
 	// TODO(timstclair): Consider returning a best-effort response if any of
 	// the following errors occur.
-	node, err := sp.provider.GetNode()
+	node, err := sp.nodeInfo.GetNode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node info: %v", err)
 	}
@@ -120,7 +123,7 @@ func (sp *summaryProviderImpl) Get(updateStats bool) (*statsapi.Summary, error) 
 func (sp *summaryProviderImpl) GetCPUAndMemoryStats() (*statsapi.Summary, error) {
 	// TODO(timstclair): Consider returning a best-effort response if any of
 	// the following errors occur.
-	node, err := sp.provider.GetNode()
+	node, err := sp.nodeInfo.GetNode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node info: %v", err)
 	}

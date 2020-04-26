@@ -200,7 +200,7 @@ func TestUpdateNewNodeStatus(t *testing.T) {
 			}
 			// Since this test retroactively overrides the stub container manager,
 			// we have to regenerate default status setters.
-			kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
+			kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
 
 			kubeClient := testKubelet.fakeKubeClient
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
@@ -329,7 +329,7 @@ func TestUpdateExistingNodeStatus(t *testing.T) {
 	}
 	// Since this test retroactively overrides the stub container manager,
 	// we have to regenerate default status setters.
-	kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
+	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
 
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := v1.Node{
@@ -583,7 +583,7 @@ func TestUpdateNodeStatusWithRuntimeStateError(t *testing.T) {
 	}
 	// Since this test retroactively overrides the stub container manager,
 	// we have to regenerate default status setters.
-	kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
+	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
 
 	clock := testKubelet.fakeClock
 	kubeClient := testKubelet.fakeKubeClient
@@ -803,8 +803,8 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	}
 	// Since this test retroactively overrides the stub container manager,
 	// we have to regenerate default status setters.
-	kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
-	kubelet.nodeStatusReportFrequency = time.Minute
+	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
+	kubelet.nodeInfo.SetNodeStatusReportFrequency(time.Minute)
 
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
@@ -1071,8 +1071,8 @@ func TestUpdateNodeStatusAndVolumesInUseWithNodeLease(t *testing.T) {
 			kubelet := testKubelet.kubelet
 			kubelet.kubeClient = nil // ensure only the heartbeat client is used
 			kubelet.containerManager = &localCM{ContainerManager: cm.NewStubContainerManager()}
-			kubelet.lastStatusReportTime = kubelet.clock.Now()
-			kubelet.nodeStatusReportFrequency = time.Hour
+			kubelet.nodeInfo.SetLastStatusReportTime(kubelet.clock.Now())
+			kubelet.nodeInfo.SetNodeStatusReportFrequency(time.Hour)
 			kubelet.machineInfo = &cadvisorapi.MachineInfo{}
 
 			// override test volumeManager
@@ -1080,10 +1080,10 @@ func TestUpdateNodeStatusAndVolumesInUseWithNodeLease(t *testing.T) {
 			kubelet.volumeManager = fakeVolumeManager
 
 			// Only test VolumesInUse setter
-			kubelet.setNodeStatusFuncs = []func(*v1.Node) error{
+			kubelet.nodeInfo.SetNodeStatusFuncs([]func(*v1.Node) error{
 				nodestatus.VolumesInUse(kubelet.volumeManager.ReconcilerStatesHasBeenSynced,
 					kubelet.volumeManager.GetVolumesInUse),
-			}
+			})
 
 			kubeClient := testKubelet.fakeKubeClient
 			kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{*tc.existingNode}}).ReactionChain
@@ -1344,7 +1344,7 @@ func TestUpdateNewNodeStatusTooLargeReservation(t *testing.T) {
 	}
 	// Since this test retroactively overrides the stub container manager,
 	// we have to regenerate default status setters.
-	kubelet.setNodeStatusFuncs = kubelet.defaultNodeStatusFuncs()
+	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
 
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
@@ -1946,10 +1946,10 @@ func TestRegisterWithApiServerWithTaint(t *testing.T) {
 	addNotImplatedReaction(kubeClient)
 
 	// Make node to be unschedulable.
-	kubelet.registerSchedulable = false
+	kubelet.nodeInfo.SetRegisterSchedulable(false)
 
 	// Reset kubelet status for each test.
-	kubelet.registrationCompleted = false
+	kubelet.nodeInfo.SetRegistrationCompleted(false)
 
 	// Register node to apiserver.
 	kubelet.registerWithAPIServer()
@@ -2255,12 +2255,12 @@ func TestUpdateNodeAddresses(t *testing.T) {
 
 			_, err := kubeClient.CoreV1().Nodes().Update(context.TODO(), oldNode, metav1.UpdateOptions{})
 			assert.NoError(t, err)
-			kubelet.setNodeStatusFuncs = []func(*v1.Node) error{
+			kubelet.nodeInfo.SetNodeStatusFuncs([]func(*v1.Node) error{
 				func(node *v1.Node) error {
 					node.Status.Addresses = expectedNode.Status.Addresses
 					return nil
 				},
-			}
+			})
 			assert.NoError(t, kubelet.updateNodeStatus())
 
 			actions := kubeClient.Actions()

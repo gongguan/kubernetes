@@ -116,29 +116,6 @@ func (_m *StatsProvider) GetContainerInfo(podFullName string, uid types.UID, con
 	return r0, r1
 }
 
-// GetNode provides a mock function with given fields:
-func (_m *StatsProvider) GetNode() (*corev1.Node, error) {
-	ret := _m.Called()
-
-	var r0 *corev1.Node
-	if rf, ok := ret.Get(0).(func() *corev1.Node); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Node)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetNodeConfig provides a mock function with given fields:
 func (_m *StatsProvider) GetNodeConfig() cm.NodeConfig {
 	ret := _m.Called()

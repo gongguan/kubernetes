@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
+	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
 	statstest "k8s.io/kubernetes/pkg/kubelet/server/stats/testing"
 )
 
@@ -69,8 +70,8 @@ func TestSummaryProviderGetStats(t *testing.T) {
 	}
 
 	mockStatsProvider := new(statstest.StatsProvider)
+	mockNodeInfoProvider := new(nodeinfo.FakeNodeInfo)
 	mockStatsProvider.
-		On("GetNode").Return(node, nil).
 		On("GetNodeConfig").Return(nodeConfig).
 		On("GetPodCgroupRoot").Return(cgroupRoot).
 		On("ListPodStats").Return(podStats, nil).
@@ -83,10 +84,11 @@ func TestSummaryProviderGetStats(t *testing.T) {
 		On("GetCgroupStats", "/misc", false).Return(cgroupStatsMap["/misc"].cs, cgroupStatsMap["/misc"].ns, nil).
 		On("GetCgroupStats", "/kubelet", false).Return(cgroupStatsMap["/kubelet"].cs, cgroupStatsMap["/kubelet"].ns, nil).
 		On("GetCgroupStats", "/kubepods", true).Return(cgroupStatsMap["/pods"].cs, cgroupStatsMap["/pods"].ns, nil)
+	mockNodeInfoProvider.On("InitialNode").Return(node, nil)
 
 	kubeletCreationTime := metav1.Now()
 	systemBootTime := metav1.Now()
-	provider := summaryProviderImpl{kubeletCreationTime: kubeletCreationTime, systemBootTime: systemBootTime, provider: mockStatsProvider}
+	provider := summaryProviderImpl{kubeletCreationTime: kubeletCreationTime, systemBootTime: systemBootTime, provider: mockStatsProvider, nodeInfo: mockNodeInfoProvider}
 	summary, err := provider.Get(true)
 	assert.NoError(err)
 
@@ -155,8 +157,8 @@ func TestSummaryProviderGetCPUAndMemoryStats(t *testing.T) {
 	}
 
 	mockStatsProvider := new(statstest.StatsProvider)
+	mockNodeInfoProvider := new(nodeinfo.FakeNodeInfo)
 	mockStatsProvider.
-		On("GetNode").Return(node, nil).
 		On("GetNodeConfig").Return(nodeConfig).
 		On("GetPodCgroupRoot").Return(cgroupRoot).
 		On("ListPodCPUAndMemoryStats").Return(podStats, nil).
@@ -165,8 +167,9 @@ func TestSummaryProviderGetCPUAndMemoryStats(t *testing.T) {
 		On("GetCgroupCPUAndMemoryStats", "/misc", false).Return(cgroupStatsMap["/misc"].cs, nil).
 		On("GetCgroupCPUAndMemoryStats", "/kubelet", false).Return(cgroupStatsMap["/kubelet"].cs, nil).
 		On("GetCgroupCPUAndMemoryStats", "/kubepods", false).Return(cgroupStatsMap["/pods"].cs, nil)
+	mockNodeInfoProvider.On("InitialNode").Return(node, nil)
 
-	provider := NewSummaryProvider(mockStatsProvider)
+	provider := NewSummaryProvider(mockNodeInfoProvider, mockStatsProvider)
 	summary, err := provider.GetCPUAndMemoryStats()
 	assert.NoError(err)
 

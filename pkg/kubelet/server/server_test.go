@@ -249,7 +249,6 @@ func (fk *fakeKubelet) GetPortForward(podName, podNamespace string, podUID types
 }
 
 // Unused functions
-func (*fakeKubelet) GetNode() (*v1.Node, error)                       { return nil, nil }
 func (*fakeKubelet) GetNodeConfig() cm.NodeConfig                     { return cm.NodeConfig{} }
 func (*fakeKubelet) GetPodCgroupRoot() string                         { return "" }
 func (*fakeKubelet) GetPodByCgroupfs(cgroupfs string) (*v1.Pod, bool) { return nil, false }
@@ -334,7 +333,7 @@ func newServerTestWithDebug(enableDebugging, redirectContainerStreaming bool, st
 	}
 	server := NewServer(
 		fw.fakeKubelet,
-		stats.NewResourceAnalyzer(fw.fakeKubelet, time.Minute),
+		stats.NewResourceAnalyzer(nil, fw.fakeKubelet, time.Minute),
 		fw.fakeAuth,
 		true,
 		enableDebugging,
