@@ -272,7 +272,7 @@ func (n *nodeInfo) InitialNode(ctx context.Context) (*v1.Node, error) {
 		node.Spec.Taints = nodeTaints
 	}
 	// Initially, set NodeNetworkUnavailable to true.
-	if n.providerRequiresNetworkingConfiguration() {
+	if providerRequiresNetworkingConfiguration(n.cloud) {
 		node.Status.Conditions = append(node.Status.Conditions, v1.NodeCondition{
 			Type:               v1.NodeNetworkUnavailable,
 			Status:             v1.ConditionTrue,
@@ -382,14 +382,14 @@ func (n *nodeInfo) SetNodeStatus(node *v1.Node) {
 
 // providerRequiresNetworkingConfiguration returns whether the cloud provider
 // requires special networking configuration.
-func (n *nodeInfo) providerRequiresNetworkingConfiguration() bool {
+func providerRequiresNetworkingConfiguration(cloud cloudprovider.Interface) bool {
 	// TODO: We should have a mechanism to say whether native cloud provider
 	// is used or whether we are using overlay networking. We should return
 	// true for cloud providers if they implement Routes() interface and
 	// we are not using overlay networking.
-	if n.cloud == nil || n.cloud.ProviderName() != "gce" {
+	if cloud == nil || cloud.ProviderName() != "gce" {
 		return false
 	}
-	_, supported := n.cloud.Routes()
+	_, supported := cloud.Routes()
 	return supported
 }
