@@ -487,7 +487,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	externalCloudProvider := cloudprovider.IsExternal(cloudProvider)
-	nodeInfo := nodeinfo.NewNodeInfo(
+	nodeInfo := nodeinfo.New(
 		hostname,
 		hostnameOverridden,
 		nodeName,

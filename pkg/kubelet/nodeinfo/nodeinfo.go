@@ -127,8 +127,8 @@ type nodeInfo struct {
 	keepTerminatedPodVolumes bool
 }
 
-// NewNodeInfo creates nodeInfo Provider which provider node information.
-func NewNodeInfo(
+// New creates nodeInfo Provider which provider node information.
+func New(
 	hostname string,
 	hostnameOverridden bool,
 	nodeName types.NodeName,

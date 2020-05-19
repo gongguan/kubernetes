@@ -147,7 +147,7 @@ func newTestNodeInfo(
 	kubeClient clientset.Interface,
 	nodeLister corelisters.NodeLister,
 ) nodeinfo.Provider {
-	return nodeinfo.NewNodeInfo(
+	return nodeinfo.New(
 		hostname, false, nodeName, nil, clock, false,
 		kubeClient, nil, nil, 0, 0, nodeLister,
 		"", false, nil, false, nil, false, false)
