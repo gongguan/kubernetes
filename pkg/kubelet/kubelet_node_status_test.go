@@ -804,7 +804,7 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	// Since this test retroactively overrides the stub container manager,
 	// we have to regenerate default status setters.
 	kubelet.nodeInfo.SetNodeStatusFuncs(kubelet.defaultNodeStatusFuncs())
-	kubelet.nodeInfo.SetNodeStatusReportFrequency(time.Minute)
+	kubelet.nodeStatusReportFrequency = time.Minute
 
 	kubeClient := testKubelet.fakeKubeClient
 	existingNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: testKubeletHostname}}
@@ -989,13 +989,13 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	// Update node status when changing pod CIDR.
 	// Report node status if it is still within the duration of nodeStatusReportFrequency.
 	clock.Step(10 * time.Second)
-	assert.Equal(t, "", kubelet.runtimeState.podCIDR(), "Pod CIDR should be empty")
+	assert.Equal(t, "", kubelet.runtimeState.PodCIDR(), "Pod CIDR should be empty")
 	podCIDRs := []string{"10.0.0.0/24", "2000::/10"}
 	updatedNode.Spec.PodCIDR = podCIDRs[0]
 	updatedNode.Spec.PodCIDRs = podCIDRs
 	kubeClient.ReactionChain = fake.NewSimpleClientset(&v1.NodeList{Items: []v1.Node{*updatedNode}}).ReactionChain
 	assert.NoError(t, kubelet.updateNodeStatus())
-	assert.Equal(t, strings.Join(podCIDRs, ","), kubelet.runtimeState.podCIDR(), "Pod CIDR should be updated now")
+	assert.Equal(t, strings.Join(podCIDRs, ","), kubelet.runtimeState.PodCIDR(), "Pod CIDR should be updated now")
 	// 2 more action (There were 7 actions before).
 	actions = kubeClient.Actions()
 	assert.Len(t, actions, 9)
@@ -1006,7 +1006,7 @@ func TestUpdateNodeStatusWithLease(t *testing.T) {
 	// Update node status when keeping the pod CIDR.
 	// Do not report node status if it is within the duration of nodeStatusReportFrequency.
 	clock.Step(10 * time.Second)
-	assert.Equal(t, strings.Join(podCIDRs, ","), kubelet.runtimeState.podCIDR(), "Pod CIDR should already be updated")
+	assert.Equal(t, strings.Join(podCIDRs, ","), kubelet.runtimeState.PodCIDR(), "Pod CIDR should already be updated")
 
 	assert.NoError(t, kubelet.updateNodeStatus())
 	// Only 1 more action (There were 9 actions before).

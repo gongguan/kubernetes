@@ -40,6 +40,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
 	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
+	"k8s.io/kubernetes/pkg/kubelet/runtimestate"
 	"k8s.io/kubernetes/pkg/kubelet/secret"
 	"k8s.io/kubernetes/pkg/kubelet/server/stats"
 	"k8s.io/kubernetes/pkg/kubelet/status"
@@ -76,7 +77,6 @@ func TestRunOnce(t *testing.T) {
 	nodeInfo := newTestNodeInfo(
 		testKubeletHostname,
 		testKubeletHostname,
-		clock.RealClock{},
 		&fake.Clientset{},
 		testNodeLister{},
 	)
@@ -93,7 +93,7 @@ func TestRunOnce(t *testing.T) {
 		reasonCache:      NewReasonCache(),
 		clock:            clock.RealClock{},
 		kubeClient:       &fake.Clientset{},
-		runtimeState:     newRuntimeState(time.Second),
+		runtimeState:     runtimestate.NewRuntimeState(time.Second),
 		hostutil:         hostutil.NewFakeHostUtil(nil),
 	}
 	kb.containerManager = cm.NewStubContainerManager()

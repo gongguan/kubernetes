@@ -3,6 +3,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
+        "node_status_others.go",
+        "node_status_windows.go",
         "setters.go",
         "status_manager.go",
     ],
@@ -19,6 +21,7 @@ go_library(
         "//pkg/kubelet/container:go_default_library",
         "//pkg/kubelet/events:go_default_library",
         "//pkg/kubelet/nodeinfo:go_default_library",
+        "//pkg/kubelet/runtimestate:go_default_library",
         "//pkg/kubelet/util:go_default_library",
         "//pkg/kubelet/volumemanager:go_default_library",
         "//pkg/util/node:go_default_library",
@@ -41,7 +44,12 @@ go_library(
         "//staging/src/k8s.io/component-base/version:go_default_library",
         "//vendor/github.com/google/cadvisor/info/v1:go_default_library",
         "//vendor/k8s.io/klog/v2:go_default_library",
-    ],
+    ] + select({
+        "@io_bazel_rules_go//go/platform:windows": [
+            "//pkg/kubelet/winstats:go_default_library",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 filegroup(

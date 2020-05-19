@@ -83,6 +83,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/network/dns"
 	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
 	"k8s.io/kubernetes/pkg/kubelet/nodelease"
+	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
 	oomwatcher "k8s.io/kubernetes/pkg/kubelet/oom"
 	"k8s.io/kubernetes/pkg/kubelet/pleg"
 	"k8s.io/kubernetes/pkg/kubelet/pluginmanager"
@@ -93,6 +94,7 @@ import (
 	proberesults "k8s.io/kubernetes/pkg/kubelet/prober/results"
 	"k8s.io/kubernetes/pkg/kubelet/remote"
 	"k8s.io/kubernetes/pkg/kubelet/runtimeclass"
+	"k8s.io/kubernetes/pkg/kubelet/runtimestate"
 	"k8s.io/kubernetes/pkg/kubelet/secret"
 	"k8s.io/kubernetes/pkg/kubelet/server"
 	servermetrics "k8s.io/kubernetes/pkg/kubelet/server/metrics"
@@ -492,21 +494,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		hostnameOverridden,
 		nodeName,
 		parsedNodeIP,
-		clock.RealClock{},
-		registerNode,
 		kubeDeps.KubeClient,
 		nodeLabels,
 		nodeRef,
-		kubeCfg.NodeStatusUpdateFrequency.Duration,
-		kubeCfg.NodeStatusReportFrequency.Duration,
 		nodeLister,
-		providerID,
-		externalCloudProvider,
-		kubeDeps.Cloud,
-		registerSchedulable,
-		registerWithTaints,
-		kubeCfg.EnableControllerAttachDetach,
-		keepTerminatedPodVolumes,
 	)
 
 	klet := &Kubelet{
@@ -525,6 +516,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		cadvisor:                                kubeDeps.CAdvisorInterface,
 		cloud:                                   kubeDeps.Cloud,
 		externalCloudProvider:                   externalCloudProvider,
+		nodeStatusUpdateFrequency:               kubeCfg.NodeStatusUpdateFrequency.Duration,
 		os:                                      kubeDeps.OSInterface,
 		oomWatcher:                              oomWatcher,
 		cgroupsPerQOS:                           kubeCfg.CgroupsPerQOS,
@@ -552,7 +544,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	if klet.cloud != nil {
-		klet.cloudResourceSyncManager = cloudresource.NewSyncManager(klet.cloud, nodeName, klet.nodeInfo.GetNodeStatusUpdateFrequency())
+		klet.cloudResourceSyncManager = cloudresource.NewSyncManager(klet.cloud, nodeName, klet.nodeStatusUpdateFrequency)
 	}
 
 	var secretManager secret.Manager
@@ -672,8 +664,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	klet.pleg = pleg.NewGenericPLEG(klet.containerRuntime, plegChannelCapacity, plegRelistPeriod, klet.podCache, clock.RealClock{})
-	klet.runtimeState = newRuntimeState(maxWaitForContainerRuntime)
-	klet.runtimeState.addHealthCheck("PLEG", klet.pleg.Healthy)
+	klet.runtimeState = runtimestate.NewRuntimeState(maxWaitForContainerRuntime)
+	klet.runtimeState.AddHealthCheck("PLEG", klet.pleg.Healthy)
 	if _, err := klet.updatePodCIDR(kubeCfg.PodCIDR); err != nil {
 		klog.Errorf("Pod CIDR update failed %v", err)
 	}
@@ -709,7 +701,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 
 	if kubeCfg.ServerTLSBootstrap && kubeDeps.TLSOptions != nil && utilfeature.DefaultFeatureGate.Enabled(features.RotateKubeletServerCertificate) {
-		klet.serverCertificateManager, err = kubeletcertificate.NewKubeletServerCertificateManager(klet.kubeClient, kubeCfg, klet.nodeInfo.GetNodeName(), klet.getLastObservedNodeAddresses, certDirectory)
+		klet.serverCertificateManager, err = kubeletcertificate.NewKubeletServerCertificateManager(klet.kubeClient, kubeCfg, klet.nodeInfo.GetNodeName(), klet.nodeStatusManager.GetLastObservedNodeAddresses, certDirectory)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize certificate manager: %v", err)
 		}
@@ -825,8 +817,30 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	// Generating the status funcs should be the last thing we do,
 	// since this relies on the rest of the Kubelet having been constructed.
-	klet.nodeInfo.SetNodeStatusFuncs(klet.defaultNodeStatusFuncs())
-
+	nodeStatusFuncs := klet.defaultNodeStatusFuncs()
+	klet.nodeStatusManager = nodestatus.NewNodeStatusManager(
+		nodeInfo,
+		clock.RealClock{},
+		registerNode,
+		kubeDeps.KubeClient,
+		kubeDeps.HeartbeatClient,
+		providerID,
+		externalCloudProvider,
+		klet.containerManager,
+		klet.runtimeState,
+		klet.containerRuntime,
+		klet.volumeManager,
+		kubeDeps.Cloud,
+		klet.cloudResourceSyncManager,
+		registerSchedulable,
+		registerWithTaints,
+		klet.enableControllerAttachDetach,
+		klet.onRepeatedHeartbeatFailure,
+		kubeCfg.NodeStatusUpdateFrequency.Duration,
+		kubeCfg.NodeStatusReportFrequency.Duration,
+		klet.keepTerminatedPodVolumes,
+		nodeStatusFuncs,
+	)
 	return klet, nil
 }
 
@@ -887,7 +901,7 @@ type Kubelet struct {
 
 	// Last timestamp when runtime responded on ping.
 	// Mutex is used to protect this value.
-	runtimeState *runtimeState
+	runtimeState *runtimestate.RuntimeState
 
 	// Volume plugins.
 	volumePluginMgr *volume.VolumePluginMgr
@@ -929,6 +943,8 @@ type Kubelet struct {
 	// Syncs pods statuses with apiserver; also used as a cache of statuses.
 	statusManager status.Manager
 
+	nodeStatusManager *nodestatus.NodeStatusManager
+
 	// VolumeManager runs a set of asynchronous loops that figure out which
 	// volumes need to be attached/mounted/unmounted/detached based on the pods
 	// scheduled on this node and makes it so.
@@ -962,6 +978,20 @@ type Kubelet struct {
 	// reasonCache caches the failure reason of the last creation of all containers, which is
 	// used for generating ContainerStatus.
 	reasonCache *ReasonCache
+
+	// nodeStatusUpdateFrequency specifies how often kubelet computes node status. If node lease
+	// feature is not enabled, it is also the frequency that kubelet posts node status to master.
+	// In that case, be cautious when changing the constant, it must work with nodeMonitorGracePeriod
+	// in nodecontroller. There are several constraints:
+	// 1. nodeMonitorGracePeriod must be N times more than nodeStatusUpdateFrequency, where
+	//    N means number of retries allowed for kubelet to post node status. It is pointless
+	//    to make nodeMonitorGracePeriod be less than nodeStatusUpdateFrequency, since there
+	//    will only be fresh values from Kubelet at an interval of nodeStatusUpdateFrequency.
+	//    The constant must be less than podEvictionTimeout.
+	// 2. nodeStatusUpdateFrequency needs to be large enough for kubelet to generate node
+	//    status. Kubelet may fail to update node status reliably if the value is too small,
+	//    as it takes time to gather all necessary node information.
+	nodeStatusUpdateFrequency time.Duration
 
 	// syncNodeStatusMux is a lock on updating the node status, because this path is not thread-safe.
 	// This lock is used by Kubelet.syncNodeStatus function and shouldn't be used anywhere else.
@@ -1306,7 +1336,7 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 
 	if kl.kubeClient != nil {
 		// Start syncing node status immediately, this may set up things the runtime needs to run.
-		go wait.Until(kl.syncNodeStatus, kl.nodeInfo.GetNodeStatusUpdateFrequency(), wait.NeverStop)
+		go wait.Until(kl.nodeStatusManager.SyncNodeStatus, kl.nodeStatusUpdateFrequency, wait.NeverStop)
 		go kl.fastStatusUpdateOnce()
 
 		// start syncing lease
@@ -1469,7 +1499,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	}
 
 	// If the network plugin is not ready, only start the pod if it uses the host network
-	if err := kl.runtimeState.networkErrors(); err != nil && !kubecontainer.IsHostNetworkPod(pod) {
+	if err := kl.runtimeState.NetworkErrors(); err != nil && !kubecontainer.IsHostNetworkPod(pod) {
 		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.NetworkNotReady, "%s: %v", NetworkNotReadyErrorMsg, err)
 		return fmt.Errorf("%s: %v", NetworkNotReadyErrorMsg, err)
 	}
@@ -1726,7 +1756,7 @@ func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHand
 	}
 
 	for {
-		if err := kl.runtimeState.runtimeErrors(); err != nil {
+		if err := kl.runtimeState.RuntimeErrors(); err != nil {
 			klog.Errorf("skipping pod synchronization - %v", err)
 			// exponential backoff
 			time.Sleep(duration)
@@ -2070,10 +2100,10 @@ func (kl *Kubelet) updateRuntimeUp() {
 	networkReady := s.GetRuntimeCondition(kubecontainer.NetworkReady)
 	if networkReady == nil || !networkReady.Status {
 		klog.Errorf("Container runtime network not ready: %v", networkReady)
-		kl.runtimeState.setNetworkState(fmt.Errorf("runtime network not ready: %v", networkReady))
+		kl.runtimeState.SetNetworkState(fmt.Errorf("runtime network not ready: %v", networkReady))
 	} else {
 		// Set nil if the container runtime network is ready.
-		kl.runtimeState.setNetworkState(nil)
+		kl.runtimeState.SetNetworkState(nil)
 	}
 	// information in RuntimeReady condition will be propagated to NodeReady condition.
 	runtimeReady := s.GetRuntimeCondition(kubecontainer.RuntimeReady)
@@ -2081,12 +2111,12 @@ func (kl *Kubelet) updateRuntimeUp() {
 	if runtimeReady == nil || !runtimeReady.Status {
 		err := fmt.Errorf("Container runtime not ready: %v", runtimeReady)
 		klog.Error(err)
-		kl.runtimeState.setRuntimeState(err)
+		kl.runtimeState.SetRuntimeState(err)
 		return
 	}
-	kl.runtimeState.setRuntimeState(nil)
+	kl.runtimeState.SetRuntimeState(nil)
 	kl.oneTimeInitializer.Do(kl.initializeRuntimeDependentModules)
-	kl.runtimeState.setRuntimeSync(kl.clock.Now())
+	kl.runtimeState.SetRuntimeSync(kl.clock.Now())
 }
 
 // GetConfiguration returns the KubeletConfiguration used to configure the kubelet.
@@ -2159,7 +2189,7 @@ func (kl *Kubelet) fastStatusUpdateOnce() {
 				continue
 			}
 			kl.updateRuntimeUp()
-			kl.syncNodeStatus()
+			kl.nodeStatusManager.SyncNodeStatus()
 			return
 		}
 	}

@@ -46,7 +46,7 @@ func (kl *Kubelet) updatePodCIDR(cidr string) (bool, error) {
 	kl.updatePodCIDRMux.Lock()
 	defer kl.updatePodCIDRMux.Unlock()
 
-	podCIDR := kl.runtimeState.podCIDR()
+	podCIDR := kl.runtimeState.PodCIDR()
 
 	if podCIDR == cidr {
 		return false, nil
@@ -61,7 +61,7 @@ func (kl *Kubelet) updatePodCIDR(cidr string) (bool, error) {
 	}
 
 	klog.Infof("Setting Pod CIDR: %v -> %v", podCIDR, cidr)
-	kl.runtimeState.setPodCIDR(cidr)
+	kl.runtimeState.SetPodCIDR(cidr)
 	return true, nil
 }
 

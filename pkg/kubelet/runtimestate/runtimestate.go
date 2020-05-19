@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kubelet
+package runtimestate
 
 import (
 	"errors"
@@ -25,7 +25,12 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
-type runtimeState struct {
+var (
+	// errNetworkUnknown indicates the network state is unknown
+	errNetworkUnknown = errors.New("network state unknown")
+)
+
+type RuntimeState struct {
 	sync.RWMutex
 	lastBaseRuntimeSync      time.Time
 	baseRuntimeSyncThreshold time.Duration
@@ -45,49 +50,49 @@ type healthCheck struct {
 	fn   healthCheckFnType
 }
 
-func (s *runtimeState) addHealthCheck(name string, f healthCheckFnType) {
+func (s *RuntimeState) AddHealthCheck(name string, f healthCheckFnType) {
 	s.Lock()
 	defer s.Unlock()
 	s.healthChecks = append(s.healthChecks, &healthCheck{name: name, fn: f})
 }
 
-func (s *runtimeState) setRuntimeSync(t time.Time) {
+func (s *RuntimeState) SetRuntimeSync(t time.Time) {
 	s.Lock()
 	defer s.Unlock()
 	s.lastBaseRuntimeSync = t
 }
 
-func (s *runtimeState) setNetworkState(err error) {
+func (s *RuntimeState) SetNetworkState(err error) {
 	s.Lock()
 	defer s.Unlock()
 	s.networkError = err
 }
 
-func (s *runtimeState) setRuntimeState(err error) {
+func (s *RuntimeState) SetRuntimeState(err error) {
 	s.Lock()
 	defer s.Unlock()
 	s.runtimeError = err
 }
 
-func (s *runtimeState) setStorageState(err error) {
+func (s *RuntimeState) SetStorageState(err error) {
 	s.Lock()
 	defer s.Unlock()
 	s.storageError = err
 }
 
-func (s *runtimeState) setPodCIDR(cidr string) {
+func (s *RuntimeState) SetPodCIDR(cidr string) {
 	s.Lock()
 	defer s.Unlock()
 	s.cidr = cidr
 }
 
-func (s *runtimeState) podCIDR() string {
+func (s *RuntimeState) PodCIDR() string {
 	s.RLock()
 	defer s.RUnlock()
 	return s.cidr
 }
 
-func (s *runtimeState) runtimeErrors() error {
+func (s *RuntimeState) RuntimeErrors() error {
 	s.RLock()
 	defer s.RUnlock()
 	errs := []error{}
@@ -108,7 +113,7 @@ func (s *runtimeState) runtimeErrors() error {
 	return utilerrors.NewAggregate(errs)
 }
 
-func (s *runtimeState) networkErrors() error {
+func (s *RuntimeState) NetworkErrors() error {
 	s.RLock()
 	defer s.RUnlock()
 	errs := []error{}
@@ -118,7 +123,7 @@ func (s *runtimeState) networkErrors() error {
 	return utilerrors.NewAggregate(errs)
 }
 
-func (s *runtimeState) storageErrors() error {
+func (s *RuntimeState) StorageErrors() error {
 	s.RLock()
 	defer s.RUnlock()
 	errs := []error{}
@@ -128,10 +133,10 @@ func (s *runtimeState) storageErrors() error {
 	return utilerrors.NewAggregate(errs)
 }
 
-func newRuntimeState(runtimeSyncThreshold time.Duration) *runtimeState {
-	return &runtimeState{
+func NewRuntimeState(runtimeSyncThreshold time.Duration) *RuntimeState {
+	return &RuntimeState{
 		lastBaseRuntimeSync:      time.Time{},
 		baseRuntimeSyncThreshold: runtimeSyncThreshold,
-		networkError:             ErrNetworkUnknown,
+		networkError:             errNetworkUnknown,
 	}
 }

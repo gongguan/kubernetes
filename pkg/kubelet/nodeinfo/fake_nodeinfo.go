@@ -19,19 +19,13 @@ package nodeinfo
 import (
 	"context"
 	"fmt"
-	"net"
-	"time"
-
 	"github.com/stretchr/testify/mock"
+	"net"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/clock"
 	clientset "k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
-	"k8s.io/cloud-provider"
-
-	api "k8s.io/kubernetes/pkg/apis/core"
 	utilnode "k8s.io/kubernetes/pkg/util/node"
 )
 
@@ -40,33 +34,20 @@ var _ Provider = &FakeNodeInfo{}
 // FakeNodeInfo mock nodeinfo.Provider implementation.
 type FakeNodeInfo struct {
 	mock.Mock
-	Hostname                     string
-	HostnameOverridden           bool
-	NodeName                     types.NodeName
-	NodeIP                       net.IP
-	Clock                        clock.Clock
-	RegisterNode                 bool
-	RegistrationCompleted        bool
-	KubeClient                   clientset.Interface
-	NodeLabels                   map[string]string
-	NodeRef                      *v1.ObjectReference
-	NodeLister                   corelisters.NodeLister
-	ProviderID                   string
-	ExternalCloudProvider        bool
-	Cloud                        cloudprovider.Interface
-	RegisterSchedulable          bool
-	RegisterWithTaints           []api.Taint
-	EnableControllerAttachDetach bool
-	NodeStatusUpdateFrequency    time.Duration
-	NodeStatusReportFrequency    time.Duration
-	LastStatusReportTime         time.Time
-	NodeStatusFuncs              []func(*v1.Node) error
-	KeepTerminatedPodVolumes     bool
+	Hostname           string
+	HostnameOverridden bool
+	NodeName           types.NodeName
+	NodeIP             net.IP
+	KubeClient         clientset.Interface
+	NodeLabels         map[string]string
+	NodeRef            *v1.ObjectReference
+	NodeLister         corelisters.NodeLister
+	InitialNodeFunc    func() (*v1.Node, error)
 }
 
 // GetHostIP is a mock implementation of Provider.GetHostIP.
-func (fn *FakeNodeInfo) GetHostIP() (net.IP, error) {
-	node, err := fn.GetNode()
+func (fni *FakeNodeInfo) GetHostIP() (net.IP, error) {
+	node, err := fni.GetNode()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get node: %v", err)
 	}
@@ -74,23 +55,27 @@ func (fn *FakeNodeInfo) GetHostIP() (net.IP, error) {
 }
 
 // GetHostIPAnyWay is a mock implementation of Provider.GetHostIPAnyWay.
-func (fn *FakeNodeInfo) GetHostIPAnyWay() (net.IP, error) {
-	return fn.GetHostIP()
+func (fni *FakeNodeInfo) GetHostIPAnyWay() (net.IP, error) {
+	return fni.GetHostIP()
 }
 
 // GetNodeAnyWay is a mock implementation of Provider.GetNodeAnyWay.
-func (fn *FakeNodeInfo) GetNodeAnyWay() (*v1.Node, error) {
-	return fn.InitialNode(context.TODO())
+func (fni *FakeNodeInfo) GetNodeAnyWay() (*v1.Node, error) {
+	return fni.initialNode(context.TODO())
 }
 
 // GetNode is a mock implementation of Provider.GetNode.
-func (fn *FakeNodeInfo) GetNode() (*v1.Node, error) {
-	return fn.InitialNode(context.TODO())
+func (fni *FakeNodeInfo) GetNode() (*v1.Node, error) {
+	return fni.initialNode(context.TODO())
+}
+
+func (fni *FakeNodeInfo) SetInitialNodeFunc(fn func() (*v1.Node, error)) {
+	fni.InitialNodeFunc = fn
 }
 
 // InitialNode is a mock implementation of Provider.InitialNode.
-func (fn *FakeNodeInfo) InitialNode(ctx context.Context) (*v1.Node, error) {
-	ret := fn.Called()
+func (fni *FakeNodeInfo) initialNode(ctx context.Context) (*v1.Node, error) {
+	ret := fni.Called()
 	var r0 *v1.Node
 	if rf, ok := ret.Get(0).(func() *v1.Node); ok {
 		r0 = rf()
@@ -109,73 +94,35 @@ func (fn *FakeNodeInfo) InitialNode(ctx context.Context) (*v1.Node, error) {
 	return r0, r1
 }
 
-// SetNodeStatus is a mock implementation of Provider.SetNodeStatus.
-func (fn *FakeNodeInfo) SetNodeStatus(node *v1.Node) {}
-
 // GetHostname is a mock implementation of Provider.GetHostname.
-func (fn *FakeNodeInfo) GetHostname() string {
-	return fn.Hostname
+func (fni *FakeNodeInfo) GetHostname() string {
+	return fni.Hostname
 }
 
 // GetHostnameOverridden is a mock implementation of Provider.GetHostnameOverridden.
-func (fn *FakeNodeInfo) GetHostnameOverridden() bool {
-	return fn.HostnameOverridden
+func (fni *FakeNodeInfo) GetHostnameOverridden() bool {
+	return fni.HostnameOverridden
 }
 
 // GetNodeName is a mock implementation of Provider.GetNodeName.
-func (fn *FakeNodeInfo) GetNodeName() types.NodeName {
-	return fn.NodeName
+func (fni *FakeNodeInfo) GetNodeName() types.NodeName {
+	return fni.NodeName
 }
 
 // GetNodeIP is a mock implementation of Provider.GetNodeIP.
-func (fn *FakeNodeInfo) GetNodeIP() net.IP {
-	return fn.NodeIP
-}
-
-// GetRegisterNode is a mock implementation of Provider.GetRegisterNode.
-func (fn *FakeNodeInfo) GetRegisterNode() bool {
-	return fn.RegisterNode
-}
-
-// GetRegistrationCompleted is a mock implementation of Provider.GetRegistrationCompleted.
-func (fn *FakeNodeInfo) GetRegistrationCompleted() bool {
-	return fn.RegistrationCompleted
+func (fni *FakeNodeInfo) GetNodeIP() net.IP {
+	return fni.NodeIP
 }
 
 // GetNodeRef is a mock implementation of Provider.GetNodeRef.
-func (fn *FakeNodeInfo) GetNodeRef() *v1.ObjectReference {
-	return fn.NodeRef
+func (fni *FakeNodeInfo) GetNodeRef() *v1.ObjectReference {
+	return fni.NodeRef
 }
 
-// GetNodeStatusUpdateFrequency is a mock implementation of Provider.GetNodeStatusUpdateFrequency.
-func (fn *FakeNodeInfo) GetNodeStatusUpdateFrequency() time.Duration {
-	return fn.NodeStatusUpdateFrequency
+// GetNodeLabels is a mock implementation of Provider.GetNodeLabels.
+func (fni *FakeNodeInfo) GetNodeLabels() map[string]string {
+	return fni.NodeLabels
 }
-
-// GetNodeStatusReportFrequency is a mock implementation of Provider.GetNodeStatusReportFrequency.
-func (fn *FakeNodeInfo) GetNodeStatusReportFrequency() time.Duration {
-	return fn.NodeStatusReportFrequency
-}
-
-// GetLastStatusReportTime is a mock implementation of Provider.GetLastStatusReportTime.
-func (fn *FakeNodeInfo) GetLastStatusReportTime() time.Time {
-	return fn.LastStatusReportTime
-}
-
-// SetRegistrationCompleted is a mock implementation of Provider.SetRegistrationCompleted.
-func (fn *FakeNodeInfo) SetRegistrationCompleted(value bool) {}
-
-// SetNodeStatusReportFrequency is a mock implementation of Provider.SetNodeStatusReportFrequency.
-func (fn *FakeNodeInfo) SetNodeStatusReportFrequency(duration time.Duration) {}
-
-// SetLastStatusReportTime is a mock implementation of Provider.SetLastStatusReportTime.
-func (fn *FakeNodeInfo) SetLastStatusReportTime(time time.Time) {}
 
 // SetNodeLister is a mock implementation of Provider.SetNodeLister.
-func (fn *FakeNodeInfo) SetNodeLister(lister corelisters.NodeLister) {}
-
-// SetRegisterSchedulable is a mock implementation of Provider.SetRegisterSchedulable.
-func (fn *FakeNodeInfo) SetRegisterSchedulable(schedulable bool) {}
-
-// SetNodeStatusFuncs is a mock implementation of Provider.SetNodeStatusFuncs.
-func (fn *FakeNodeInfo) SetNodeStatusFuncs(funcs []func(*v1.Node) error) {}
+func (fni *FakeNodeInfo) SetNodeLister(lister corelisters.NodeLister) {}

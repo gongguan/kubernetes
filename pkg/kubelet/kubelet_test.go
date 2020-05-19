@@ -61,6 +61,7 @@ import (
 	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
 	proberesults "k8s.io/kubernetes/pkg/kubelet/prober/results"
 	probetest "k8s.io/kubernetes/pkg/kubelet/prober/testing"
+	"k8s.io/kubernetes/pkg/kubelet/runtimestate"
 	"k8s.io/kubernetes/pkg/kubelet/secret"
 	serverstats "k8s.io/kubernetes/pkg/kubelet/server/stats"
 	"k8s.io/kubernetes/pkg/kubelet/stats"
@@ -143,14 +144,12 @@ func newTestKubelet(t *testing.T, controllerAttachDetachEnabled bool) *TestKubel
 func newTestNodeInfo(
 	hostname string,
 	nodeName types.NodeName,
-	clock clock.Clock,
 	kubeClient clientset.Interface,
 	nodeLister corelisters.NodeLister,
 ) nodeinfo.Provider {
 	return nodeinfo.New(
-		hostname, false, nodeName, nil, clock, false,
-		kubeClient, nil, nil, 0, 0, nodeLister,
-		"", false, nil, false, nil, false, false)
+		hostname, false, nodeName, nil,
+		kubeClient, nil, nil, nodeLister)
 }
 
 func newTestKubeletWithImageList(
@@ -181,8 +180,8 @@ func newTestKubeletWithImageList(
 	kubelet.hostutil = hostutil.NewFakeHostUtil(nil)
 	kubelet.subpather = &subpath.FakeSubpath{}
 
-	kubelet.runtimeState = newRuntimeState(maxWaitForContainerRuntime)
-	kubelet.runtimeState.setNetworkState(nil)
+	kubelet.runtimeState = runtimestate.NewRuntimeState(maxWaitForContainerRuntime)
+	kubelet.runtimeState.SetNetworkState(nil)
 	if tempDir, err := ioutil.TempDir("", "kubelet_test."); err != nil {
 		t.Fatalf("can't make a temp rootdir: %v", err)
 	} else {
@@ -224,7 +223,6 @@ func newTestKubeletWithImageList(
 	nodeInfo := newTestNodeInfo(
 		testKubeletHostname,
 		types.NodeName(testKubeletHostname),
-		fakeClock,
 		fakeKubeClient,
 		nodeLister,
 	)
@@ -388,7 +386,7 @@ func TestSyncLoopAbort(t *testing.T) {
 	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
 	defer testKubelet.Cleanup()
 	kubelet := testKubelet.kubelet
-	kubelet.runtimeState.setRuntimeSync(time.Now())
+	kubelet.runtimeState.SetRuntimeSync(time.Now())
 	// The syncLoop waits on time.After(resyncInterval), set it really big so that we don't race for
 	// the channel close
 	kubelet.resyncInterval = time.Second * 30
@@ -1138,7 +1136,7 @@ func TestNetworkErrorsWithoutHostNetwork(t *testing.T) {
 	defer testKubelet.Cleanup()
 	kubelet := testKubelet.kubelet
 
-	kubelet.runtimeState.setNetworkState(fmt.Errorf("simulated network error"))
+	kubelet.runtimeState.SetNetworkState(fmt.Errorf("simulated network error"))
 
 	pod := podWithUIDNameNsSpec("12345678", "hostnetwork", "new", v1.PodSpec{
 		HostNetwork: false,

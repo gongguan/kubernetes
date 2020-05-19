@@ -1,4 +1,4 @@
-// +build !windows
+// +build windows
 
 /*
 Copyright 2019 The Kubernetes Authors.
@@ -16,8 +16,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeinfo
+package nodestatus
+
+import (
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/kubernetes/pkg/kubelet/winstats"
+)
 
 func getOSSpecificLabels() (map[string]string, error) {
-	return nil, nil
+	osInfo, err := winstats.GetOSInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{v1.LabelWindowsBuild: osInfo.GetBuild()}, nil
 }

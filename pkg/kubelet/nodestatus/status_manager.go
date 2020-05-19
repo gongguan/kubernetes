@@ -44,6 +44,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/nodeinfo"
+	"k8s.io/kubernetes/pkg/kubelet/runtimestate"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/volumemanager"
 	nodeutil "k8s.io/kubernetes/pkg/util/node"
@@ -81,7 +82,7 @@ type NodeStatusManager struct {
 
 	// Last timestamp when runtime responded on ping.
 	// Mutex is used to protect this value.
-	runtimeState *runtimeState
+	runtimeState *runtimestate.RuntimeState
 
 	// Container runtime.
 	containerRuntime kubecontainer.Runtime
@@ -146,15 +147,56 @@ type NodeStatusManager struct {
 
 	// keepTerminatedPodVolumes is kubelet keepTerminatedPodVolumes.
 	keepTerminatedPodVolumes bool
+}
 
-	// Maximum Number of Pods which can be run by this Kubelet
-	maxPods int
-
-	// the number of allowed pods per core
-	podsPerCore int
-
-	// This flag sets a maximum number of images to report in the node status.
-	nodeStatusMaxImages int32
+func NewNodeStatusManager(
+	nodeInfo nodeinfo.Provider,
+	clock clock.Clock,
+	registerNode bool,
+	kubeClient clientset.Interface,
+	heartbeatClient clientset.Interface,
+	providerID string,
+	externalCloudProvider bool,
+	containerManager cm.ContainerManager,
+	runtimeState *runtimestate.RuntimeState,
+	containerRuntime kubecontainer.Runtime,
+	volumeManager volumemanager.VolumeManager,
+	cloud cloudprovider.Interface,
+	cloudResourceSyncManager cloudresource.SyncManager,
+	registerSchedulable bool,
+	registerWithTaints []api.Taint,
+	enableControllerAttachDetach bool,
+	onRepeatedHeartbeatFailure func(),
+	nodeStatusUpdateFrequency time.Duration,
+	nodeStatusReportFrequency time.Duration,
+	keepTerminatedPodVolumes bool,
+	nodeStatusFuncs []func(*v1.Node) error,
+) *NodeStatusManager {
+	mgr := &NodeStatusManager{
+		nodeInfo:                     nodeInfo,
+		clock:                        clock,
+		registerNode:                 registerNode,
+		kubeClient:                   kubeClient,
+		heartbeatClient:              heartbeatClient,
+		providerID:                   providerID,
+		externalCloudProvider:        externalCloudProvider,
+		containerManager:             containerManager,
+		runtimeState:                 runtimeState,
+		containerRuntime:             containerRuntime,
+		volumeManager:                volumeManager,
+		cloud:                        cloud,
+		cloudResourceSyncManager:     cloudResourceSyncManager,
+		registerSchedulable:          registerSchedulable,
+		registerWithTaints:           registerWithTaints,
+		enableControllerAttachDetach: enableControllerAttachDetach,
+		onRepeatedHeartbeatFailure:   onRepeatedHeartbeatFailure,
+		nodeStatusUpdateFrequency:    nodeStatusUpdateFrequency,
+		nodeStatusReportFrequency:    nodeStatusReportFrequency,
+		keepTerminatedPodVolumes:     keepTerminatedPodVolumes,
+		nodeStatusFuncs:              nodeStatusFuncs,
+	}
+	nodeInfo.SetInitialNodeFunc(mgr.initialNode)
+	return mgr
 }
 
 // SyncNodeStatus should be called periodically from a goroutine.
@@ -272,7 +314,7 @@ func (ns *NodeStatusManager) updatePodCIDR(cidr string) (bool, error) {
 	ns.updatePodCIDRMux.Lock()
 	defer ns.updatePodCIDRMux.Unlock()
 
-	podCIDR := ns.runtimeState.podCIDR()
+	podCIDR := ns.runtimeState.PodCIDR()
 
 	if podCIDR == cidr {
 		return false, nil
@@ -287,7 +329,7 @@ func (ns *NodeStatusManager) updatePodCIDR(cidr string) (bool, error) {
 	}
 
 	klog.Infof("Setting Pod CIDR: %v -> %v", podCIDR, cidr)
-	ns.runtimeState.setPodCIDR(cidr)
+	ns.runtimeState.SetPodCIDR(cidr)
 	return true, nil
 }
 
@@ -346,7 +388,7 @@ func (ns *NodeStatusManager) setLastObservedNodeAddresses(addresses []v1.NodeAdd
 	defer ns.lastObservedNodeAddressesMux.Unlock()
 	ns.lastObservedNodeAddresses = addresses
 }
-func (ns *NodeStatusManager) getLastObservedNodeAddresses() []v1.NodeAddress {
+func (ns *NodeStatusManager) GetLastObservedNodeAddresses() []v1.NodeAddress {
 	ns.lastObservedNodeAddressesMux.RLock()
 	defer ns.lastObservedNodeAddressesMux.RUnlock()
 	return ns.lastObservedNodeAddresses
@@ -354,7 +396,7 @@ func (ns *NodeStatusManager) getLastObservedNodeAddresses() []v1.NodeAddress {
 
 // InitialNode constructs the initial v1.Node for this Kubelet, incorporating node
 // labels, information from the cloud provider, and Kubelet configuration.
-func (ns *NodeStatusManager) initialNode(ctx context.Context) (*v1.Node, error) {
+func (ns *NodeStatusManager) initialNode() (*v1.Node, error) {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: string(ns.nodeInfo.GetNodeName()),
@@ -422,7 +464,7 @@ func (ns *NodeStatusManager) initialNode(ctx context.Context) (*v1.Node, error) 
 		})
 	}
 
-	if s.enableControllerAttachDetach {
+	if ns.enableControllerAttachDetach {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)
 		}
@@ -442,7 +484,7 @@ func (ns *NodeStatusManager) initialNode(ctx context.Context) (*v1.Node, error) 
 	}
 
 	// @question: should this be place after the call to the cloud provider? which also applies labels
-	for k, v := range ns.nodeLabels {
+	for k, v := range ns.nodeInfo.GetNodeLabels() {
 		if cv, found := node.ObjectMeta.Labels[k]; found {
 			klog.Warningf("the node label %s=%s will overwrite default setting %s", k, v, cv)
 		}
@@ -454,6 +496,7 @@ func (ns *NodeStatusManager) initialNode(ctx context.Context) (*v1.Node, error) 
 	}
 
 	if ns.cloud != nil {
+		ctx := context.TODO()
 		instances, ok := ns.cloud.Instances()
 		if !ok {
 			return nil, fmt.Errorf("failed to get instances from cloud provider")
@@ -507,11 +550,6 @@ func (ns *NodeStatusManager) initialNode(ctx context.Context) (*v1.Node, error) 
 	return node, nil
 }
 
-// SetNodeStatusFuncs Sets the nodeInfo nodeStatusFuncs.
-func (ns *NodeStatusManager) SetNodeStatusFuncs(funcs []func(*v1.Node) error) {
-	ns.nodeStatusFuncs = funcs
-}
-
 // setNodeStatus fills in the Status fields of the given Node, overwriting
 // any fields that are currently set.
 // TODO(madhusudancs): Simplify the logic for setting node conditions and
@@ -543,7 +581,7 @@ func providerRequiresNetworkingConfiguration(cloud cloudprovider.Interface) bool
 // to call multiple times, but not concurrently (kl.registrationCompleted is
 // not locked).
 func (ns *NodeStatusManager) registerWithAPIServer() {
-	if ns.nodeInfo.GetRegistrationCompleted() {
+	if ns.registrationCompleted {
 		return
 	}
 	step := 100 * time.Millisecond
@@ -555,7 +593,7 @@ func (ns *NodeStatusManager) registerWithAPIServer() {
 			step = 7 * time.Second
 		}
 
-		node, err := ns.initialNode(context.TODO())
+		node, err := ns.initialNode()
 		if err != nil {
 			klog.Errorf("Unable to construct v1.Node object for kubelet: %v", err)
 			continue
@@ -565,7 +603,7 @@ func (ns *NodeStatusManager) registerWithAPIServer() {
 		registered := ns.tryRegisterWithAPIServer(node)
 		if registered {
 			klog.Infof("Successfully registered node %s", node.Name)
-			ns.nodeInfo.SetRegistrationCompleted(true)
+			ns.registrationCompleted = true
 			return
 		}
 	}
