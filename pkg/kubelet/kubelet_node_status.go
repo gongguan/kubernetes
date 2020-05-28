@@ -23,6 +23,7 @@ import (
 	goruntime "runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -31,24 +32,188 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/clock"
+	"k8s.io/apimachinery/pkg/util/wait"
+	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
+
+	api "k8s.io/kubernetes/pkg/apis/core"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+	"k8s.io/kubernetes/pkg/kubelet/cm"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
 	"k8s.io/kubernetes/pkg/kubelet/util"
+	"k8s.io/kubernetes/pkg/kubelet/volumemanager"
 	nodeutil "k8s.io/kubernetes/pkg/util/node"
 	taintutil "k8s.io/kubernetes/pkg/util/taints"
 	volutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
+const (
+	// nodeStatusUpdateRetry specifies how many times kubelet retries when posting node status failed.
+	nodeStatusUpdateRetry = 5
+)
+
+// NodeStatusManager manage node status.
+type NodeStatusManager struct {
+	// hostname is kubelet hostname.
+	hostname string
+	// nodeName is kubelet nodeName.
+	nodeName types.NodeName
+	// clock records node status updated time.
+	clock clock.Clock
+	// registerNode Set to true means node register itself with the apiserver.
+	registerNode bool
+	// kubeClient used to register node.
+	kubeClient clientset.Interface
+	// heartbeatClient used to sync node status.
+	heartbeatClient clientset.Interface
+	// for internal book keeping; access only from within registerWithApiserver
+	registrationCompleted bool
+	// If non-nil, this is a unique identifier for the node in an external database, eg. cloudprovider
+	providerID string
+	// externalCloudProvider is kubelet externalCloudProvider.
+	externalCloudProvider bool
+	// containerManager is kubelet containerManager.
+	containerManager cm.ContainerManager
+	// volumeManager is kubelet volumeManager.
+	volumeManager volumemanager.VolumeManager
+	// cloud is kubelet cloud.
+	cloud cloudprovider.Interface
+	// syncNodeStatusMux is a lock on updating the node status, because this path is not thread-safe.
+	// This lock is used by Kubelet.syncNodeStatus function and shouldn't be used anywhere else.
+	syncNodeStatusMux sync.Mutex
+	// nodeLabels is a list of node labels to register.
+	nodeLabels map[string]string
+	// Set to true to have the node register itself as schedulable.
+	registerSchedulable bool
+	// List of taints to add to a node object when the kubelet registers itself.
+	registerWithTaints []api.Taint
+	// enableControllerAttachDetach indicates the Attach/Detach controller
+	// should manage attachment/detachment of volumes scheduled to this node,
+	// and disable kubelet from executing any attach/detach operations
+	enableControllerAttachDetach bool
+	// onRepeatedHeartbeatFailure is called when a heartbeat operation fails more than once. optional.
+	onRepeatedHeartbeatFailure func()
+	// nodeStatusUpdateFrequency is kubelet nodeStatusUpdateFrequency.
+	nodeStatusUpdateFrequency time.Duration
+	// nodeStatusReportFrequency is the frequency that kubelet posts node
+	// status to master. It is only used when node lease feature is enabled.
+	nodeStatusReportFrequency time.Duration
+	// lastStatusReportTime is the time when node status was last reported.
+	lastStatusReportTime time.Time
+	// handlers called during the tryUpdateNodeStatus cycle
+	nodeStatusFuncs []func(*v1.Node) error
+	// getNodeFunc is kubelet GetNode function.
+	getNodeFunc func() (*v1.Node, error)
+	// updateRuntimeUpFunc is kubelet updateRuntimeUp function.
+	updateRuntimeUpFunc func()
+	// updatePodCIDRFunc is kubelet updatePodCIDR function.
+	updatePodCIDRFunc func(string) (bool, error)
+	// setLastObservedNodeAddressesFunc is kubelet setLastObservedNodeAddresses function.
+	setLastObservedNodeAddressesFunc func(addresses []v1.NodeAddress)
+	// keepTerminatedPodVolumes is kubelet keepTerminatedPodVolumes.
+	keepTerminatedPodVolumes bool
+}
+
+// NewNodeStatusManager build nodeStatus Manager.
+// TODO (follow up work)move it and related tests to kubelet/nodestatus package.
+func NewNodeStatusManager(
+	hostname string,
+	nodeName types.NodeName,
+	clock clock.Clock,
+	nodeLabels map[string]string,
+	registerNode bool,
+	kubeClient clientset.Interface,
+	heartbeatClient clientset.Interface,
+	providerID string,
+	externalCloudProvider bool,
+	containerManager cm.ContainerManager,
+	volumeManager volumemanager.VolumeManager,
+	cloud cloudprovider.Interface,
+	registerSchedulable bool,
+	registerWithTaints []api.Taint,
+	enableControllerAttachDetach bool,
+	onRepeatedHeartbeatFailure func(),
+	nodeStatusUpdateFrequency time.Duration,
+	nodeStatusReportFrequency time.Duration,
+	keepTerminatedPodVolumes bool,
+	getNodeFunc func() (*v1.Node, error),
+	updateRuntimeUpFunc func(),
+	updatePodCIDRFunc func(string) (bool, error),
+	setLastObservedNodeAddressesFunc func(addresses []v1.NodeAddress),
+	nodeStatusFuncs []func(*v1.Node) error,
+) *NodeStatusManager {
+	return &NodeStatusManager{
+		hostname:                         hostname,
+		nodeName:                         nodeName,
+		nodeLabels:                       nodeLabels,
+		clock:                            clock,
+		registerNode:                     registerNode,
+		kubeClient:                       kubeClient,
+		heartbeatClient:                  heartbeatClient,
+		providerID:                       providerID,
+		externalCloudProvider:            externalCloudProvider,
+		containerManager:                 containerManager,
+		volumeManager:                    volumeManager,
+		cloud:                            cloud,
+		registerSchedulable:              registerSchedulable,
+		registerWithTaints:               registerWithTaints,
+		enableControllerAttachDetach:     enableControllerAttachDetach,
+		onRepeatedHeartbeatFailure:       onRepeatedHeartbeatFailure,
+		nodeStatusUpdateFrequency:        nodeStatusUpdateFrequency,
+		nodeStatusReportFrequency:        nodeStatusReportFrequency,
+		keepTerminatedPodVolumes:         keepTerminatedPodVolumes,
+		getNodeFunc:                      getNodeFunc,
+		updateRuntimeUpFunc:              updateRuntimeUpFunc,
+		updatePodCIDRFunc:                updatePodCIDRFunc,
+		setLastObservedNodeAddressesFunc: setLastObservedNodeAddressesFunc,
+		nodeStatusFuncs:                  nodeStatusFuncs,
+	}
+}
+
+// Run sync node status.
+func (s *NodeStatusManager) Run(stopCh <-chan struct{}) {
+	go s.fastStatusUpdateOnce()
+	wait.Until(s.syncNodeStatus, s.nodeStatusUpdateFrequency, wait.NeverStop)
+
+	<-stopCh
+}
+
+// fastStatusUpdateOnce starts a loop that checks the internal node indexer cache for when a CIDR
+// is applied  and tries to update pod CIDR immediately. After pod CIDR is updated it fires off
+// a runtime update and a node status update. Function returns after one successful node status update.
+// Function is executed only during Kubelet start which improves latency to ready node by updating
+// pod CIDR, runtime status and node statuses ASAP.
+func (s *NodeStatusManager) fastStatusUpdateOnce() {
+	for {
+		time.Sleep(100 * time.Millisecond)
+		node, err := s.getNodeFunc()
+		if err != nil {
+			klog.Errorf(err.Error())
+			continue
+		}
+		if len(node.Spec.PodCIDRs) != 0 {
+			podCIDRs := strings.Join(node.Spec.PodCIDRs, ",")
+			if _, err := s.updatePodCIDRFunc(podCIDRs); err != nil {
+				klog.Errorf("Pod CIDR update to %v failed %v", podCIDRs, err)
+				continue
+			}
+			s.updateRuntimeUpFunc()
+			s.syncNodeStatus()
+			return
+		}
+	}
+}
+
 // registerWithAPIServer registers the node with the cluster master. It is safe
 // to call multiple times, but not concurrently (kl.registrationCompleted is
 // not locked).
-func (kl *Kubelet) registerWithAPIServer() {
-	if kl.registrationCompleted {
+func (s *NodeStatusManager) registerWithAPIServer() {
+	if s.registrationCompleted {
 		return
 	}
 	step := 100 * time.Millisecond
@@ -60,17 +225,17 @@ func (kl *Kubelet) registerWithAPIServer() {
 			step = 7 * time.Second
 		}
 
-		node, err := kl.initialNode(context.TODO())
+		node, err := s.InitialNode(context.TODO())
 		if err != nil {
 			klog.Errorf("Unable to construct v1.Node object for kubelet: %v", err)
 			continue
 		}
 
 		klog.Infof("Attempting to register node %s", node.Name)
-		registered := kl.tryRegisterWithAPIServer(node)
+		registered := s.tryRegisterWithAPIServer(node)
 		if registered {
 			klog.Infof("Successfully registered node %s", node.Name)
-			kl.registrationCompleted = true
+			s.registrationCompleted = true
 			return
 		}
 	}
@@ -81,44 +246,44 @@ func (kl *Kubelet) registerWithAPIServer() {
 // successful.  If a node with the same name already exists, it reconciles the
 // value of the annotation for controller-managed attach-detach of attachable
 // persistent volumes for the node.
-func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
-	_, err := kl.kubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+func (s *NodeStatusManager) tryRegisterWithAPIServer(node *v1.Node) bool {
+	_, err := s.kubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
 	if err == nil {
 		return true
 	}
 
 	if !apierrors.IsAlreadyExists(err) {
-		klog.Errorf("Unable to register node %q with API server: %v", kl.nodeName, err)
+		klog.Errorf("Unable to register node %q with API server: %v", s.nodeName, err)
 		return false
 	}
 
-	existingNode, err := kl.kubeClient.CoreV1().Nodes().Get(context.TODO(), string(kl.nodeName), metav1.GetOptions{})
+	existingNode, err := s.kubeClient.CoreV1().Nodes().Get(context.TODO(), string(s.nodeName), metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Unable to register node %q with API server: error getting existing node: %v", kl.nodeName, err)
+		klog.Errorf("Unable to register node %q with API server: error getting existing node: %v", s.nodeName, err)
 		return false
 	}
 	if existingNode == nil {
-		klog.Errorf("Unable to register node %q with API server: no node instance returned", kl.nodeName)
+		klog.Errorf("Unable to register node %q with API server: no node instance returned", s.nodeName)
 		return false
 	}
 
 	originalNode := existingNode.DeepCopy()
 	if originalNode == nil {
-		klog.Errorf("Nil %q node object", kl.nodeName)
+		klog.Errorf("Nil %q node object", s.nodeName)
 		return false
 	}
 
-	klog.Infof("Node %s was previously registered", kl.nodeName)
+	klog.Infof("Node %s was previously registered", s.nodeName)
 
 	// Edge case: the node was previously registered; reconcile
 	// the value of the controller-managed attach-detach
 	// annotation.
-	requiresUpdate := kl.reconcileCMADAnnotationWithExistingNode(node, existingNode)
-	requiresUpdate = kl.updateDefaultLabels(node, existingNode) || requiresUpdate
-	requiresUpdate = kl.reconcileExtendedResource(node, existingNode) || requiresUpdate
+	requiresUpdate := reconcileCMADAnnotationWithExistingNode(node, existingNode)
+	requiresUpdate = updateDefaultLabels(node, existingNode) || requiresUpdate
+	requiresUpdate = s.reconcileExtendedResource(node, existingNode) || requiresUpdate
 	if requiresUpdate {
-		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, existingNode); err != nil {
-			klog.Errorf("Unable to reconcile node %q with API server: error updating node: %v", kl.nodeName, err)
+		if _, _, err := nodeutil.PatchNodeStatus(s.kubeClient.CoreV1(), types.NodeName(s.nodeName), originalNode, existingNode); err != nil {
+			klog.Errorf("Unable to reconcile node %q with API server: error updating node: %v", s.nodeName, err)
 			return false
 		}
 	}
@@ -127,10 +292,10 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
 }
 
 // Zeros out extended resource capacity during reconciliation.
-func (kl *Kubelet) reconcileExtendedResource(initialNode, node *v1.Node) bool {
+func (s *NodeStatusManager) reconcileExtendedResource(initialNode, node *v1.Node) bool {
 	requiresUpdate := false
 	// Check with the device manager to see if node has been recreated, in which case extended resources should be zeroed until they are available
-	if kl.containerManager.ShouldResetExtendedResourceCapacity() {
+	if s.containerManager.ShouldResetExtendedResourceCapacity() {
 		for k := range node.Status.Capacity {
 			if v1helper.IsExtendedResourceName(k) {
 				klog.Infof("Zero out resource %s capacity in existing node.", k)
@@ -144,7 +309,7 @@ func (kl *Kubelet) reconcileExtendedResource(initialNode, node *v1.Node) bool {
 }
 
 // updateDefaultLabels will set the default labels on the node
-func (kl *Kubelet) updateDefaultLabels(initialNode, existingNode *v1.Node) bool {
+func updateDefaultLabels(initialNode, existingNode *v1.Node) bool {
 	defaultLabels := []string{
 		v1.LabelHostname,
 		v1.LabelZoneFailureDomainStable,
@@ -184,7 +349,7 @@ func (kl *Kubelet) updateDefaultLabels(initialNode, existingNode *v1.Node) bool 
 // reconcileCMADAnnotationWithExistingNode reconciles the controller-managed
 // attach-detach annotation on a new node and the existing node, returning
 // whether the existing node must be updated.
-func (kl *Kubelet) reconcileCMADAnnotationWithExistingNode(node, existingNode *v1.Node) bool {
+func reconcileCMADAnnotationWithExistingNode(node, existingNode *v1.Node) bool {
 	var (
 		existingCMAAnnotation    = existingNode.Annotations[volutil.ControllerManagedAttachAnnotation]
 		newCMAAnnotation, newSet = node.Annotations[volutil.ControllerManagedAttachAnnotation]
@@ -211,20 +376,20 @@ func (kl *Kubelet) reconcileCMADAnnotationWithExistingNode(node, existingNode *v
 	return true
 }
 
-// initialNode constructs the initial v1.Node for this Kubelet, incorporating node
+// InitialNode constructs the initial v1.Node for this Kubelet, incorporating node
 // labels, information from the cloud provider, and Kubelet configuration.
-func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
+func (s *NodeStatusManager) InitialNode(ctx context.Context) (*v1.Node, error) {
 	node := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: string(kl.nodeName),
+			Name: string(s.nodeName),
 			Labels: map[string]string{
-				v1.LabelHostname:   kl.hostname,
+				v1.LabelHostname:   s.hostname,
 				v1.LabelOSStable:   goruntime.GOOS,
 				v1.LabelArchStable: goruntime.GOARCH,
 			},
 		},
 		Spec: v1.NodeSpec{
-			Unschedulable: !kl.registerSchedulable,
+			Unschedulable: !s.registerSchedulable,
 		},
 	}
 	osLabels, err := getOSSpecificLabels()
@@ -236,10 +401,10 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 	}
 
 	nodeTaints := make([]v1.Taint, 0)
-	if len(kl.registerWithTaints) > 0 {
-		taints := make([]v1.Taint, len(kl.registerWithTaints))
-		for i := range kl.registerWithTaints {
-			if err := k8s_api_v1.Convert_core_Taint_To_v1_Taint(&kl.registerWithTaints[i], &taints[i], nil); err != nil {
+	if len(s.registerWithTaints) > 0 {
+		taints := make([]v1.Taint, len(s.registerWithTaints))
+		for i := range s.registerWithTaints {
+			if err := k8s_api_v1.Convert_core_Taint_To_v1_Taint(&s.registerWithTaints[i], &taints[i], nil); err != nil {
 				return nil, err
 			}
 		}
@@ -258,7 +423,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 		nodeTaints = append(nodeTaints, unschedulableTaint)
 	}
 
-	if kl.externalCloudProvider {
+	if s.externalCloudProvider {
 		taint := v1.Taint{
 			Key:    cloudproviderapi.TaintExternalCloudProvider,
 			Value:  "true",
@@ -271,17 +436,17 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 		node.Spec.Taints = nodeTaints
 	}
 	// Initially, set NodeNetworkUnavailable to true.
-	if kl.providerRequiresNetworkingConfiguration() {
+	if providerRequiresNetworkingConfiguration(s.cloud) {
 		node.Status.Conditions = append(node.Status.Conditions, v1.NodeCondition{
 			Type:               v1.NodeNetworkUnavailable,
 			Status:             v1.ConditionTrue,
 			Reason:             "NoRouteCreated",
 			Message:            "Node created without a route",
-			LastTransitionTime: metav1.NewTime(kl.clock.Now()),
+			LastTransitionTime: metav1.NewTime(s.clock.Now()),
 		})
 	}
 
-	if kl.enableControllerAttachDetach {
+	if s.enableControllerAttachDetach {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)
 		}
@@ -292,7 +457,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 		klog.V(2).Infof("Controller attach/detach is disabled for this node; Kubelet will attach and detach volumes")
 	}
 
-	if kl.keepTerminatedPodVolumes {
+	if s.keepTerminatedPodVolumes {
 		if node.Annotations == nil {
 			node.Annotations = make(map[string]string)
 		}
@@ -301,19 +466,19 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 	}
 
 	// @question: should this be place after the call to the cloud provider? which also applies labels
-	for k, v := range kl.nodeLabels {
+	for k, v := range s.nodeLabels {
 		if cv, found := node.ObjectMeta.Labels[k]; found {
 			klog.Warningf("the node label %s=%s will overwrite default setting %s", k, v, cv)
 		}
 		node.ObjectMeta.Labels[k] = v
 	}
 
-	if kl.providerID != "" {
-		node.Spec.ProviderID = kl.providerID
+	if s.providerID != "" {
+		node.Spec.ProviderID = s.providerID
 	}
 
-	if kl.cloud != nil {
-		instances, ok := kl.cloud.Instances()
+	if s.cloud != nil {
+		instances, ok := s.cloud.Instances()
 		if !ok {
 			return nil, fmt.Errorf("failed to get instances from cloud provider")
 		}
@@ -323,13 +488,13 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 		// local metadata server here.
 		var err error
 		if node.Spec.ProviderID == "" {
-			node.Spec.ProviderID, err = cloudprovider.GetInstanceProviderID(ctx, kl.cloud, kl.nodeName)
+			node.Spec.ProviderID, err = cloudprovider.GetInstanceProviderID(ctx, s.cloud, s.nodeName)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		instanceType, err := instances.InstanceType(ctx, kl.nodeName)
+		instanceType, err := instances.InstanceType(ctx, s.nodeName)
 		if err != nil {
 			return nil, err
 		}
@@ -340,7 +505,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 			node.ObjectMeta.Labels[v1.LabelInstanceTypeStable] = instanceType
 		}
 		// If the cloud has zone information, label the node with the zone information
-		zones, ok := kl.cloud.Zones()
+		zones, ok := s.cloud.Zones()
 		if ok {
 			zone, err := zones.GetZone(ctx)
 			if err != nil {
@@ -361,38 +526,39 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
 		}
 	}
 
-	kl.setNodeStatus(node)
+	s.setNodeStatus(node)
 
 	return node, nil
 }
 
-// syncNodeStatus should be called periodically from a goroutine.
+// SyncNodeStatus should be called periodically from a goroutine.
 // It synchronizes node status to master if there is any change or enough time
 // passed from the last sync, registering the kubelet first if necessary.
-func (kl *Kubelet) syncNodeStatus() {
-	kl.syncNodeStatusMux.Lock()
-	defer kl.syncNodeStatusMux.Unlock()
+func (s *NodeStatusManager) syncNodeStatus() {
+	s.syncNodeStatusMux.Lock()
+	defer s.syncNodeStatusMux.Unlock()
 
-	if kl.kubeClient == nil || kl.heartbeatClient == nil {
+	if s.kubeClient == nil || s.heartbeatClient == nil {
 		return
 	}
-	if kl.registerNode {
+	if s.registerNode {
 		// This will exit immediately if it doesn't need to do anything.
-		kl.registerWithAPIServer()
+		s.registerWithAPIServer()
 	}
-	if err := kl.updateNodeStatus(); err != nil {
+	if err := s.UpdateNodeStatus(); err != nil {
 		klog.Errorf("Unable to update node status: %v", err)
 	}
 }
 
-// updateNodeStatus updates node status to master with retries if there is any
+// UpdateNodeStatus updates node status to master with retries if there is any
 // change or enough time passed from the last sync.
-func (kl *Kubelet) updateNodeStatus() error {
+// Make UpdateNodeStatus public to be better tests with current kubelet defaultNodeStatusFuncs.
+func (s *NodeStatusManager) UpdateNodeStatus() error {
 	klog.V(5).Infof("Updating node status")
 	for i := 0; i < nodeStatusUpdateRetry; i++ {
-		if err := kl.tryUpdateNodeStatus(i); err != nil {
-			if i > 0 && kl.onRepeatedHeartbeatFailure != nil {
-				kl.onRepeatedHeartbeatFailure()
+		if err := s.tryUpdateNodeStatus(i); err != nil {
+			if i > 0 && s.onRepeatedHeartbeatFailure != nil {
+				s.onRepeatedHeartbeatFailure()
 			}
 			klog.Errorf("Error updating node status, will retry: %v", err)
 		} else {
@@ -404,7 +570,7 @@ func (kl *Kubelet) updateNodeStatus() error {
 
 // tryUpdateNodeStatus tries to update node status to master if there is any
 // change or enough time passed from the last sync.
-func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
+func (s *NodeStatusManager) tryUpdateNodeStatus(tryNumber int) error {
 	// In large clusters, GET and PUT operations on Node objects coming
 	// from here are the majority of load on apiserver and etcd.
 	// To reduce the load on etcd, we are serving GET operations from
@@ -415,14 +581,14 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	if tryNumber == 0 {
 		util.FromApiserverCache(&opts)
 	}
-	node, err := kl.heartbeatClient.CoreV1().Nodes().Get(context.TODO(), string(kl.nodeName), opts)
+	node, err := s.heartbeatClient.CoreV1().Nodes().Get(context.TODO(), string(s.nodeName), opts)
 	if err != nil {
-		return fmt.Errorf("error getting node %q: %v", kl.nodeName, err)
+		return fmt.Errorf("error getting node %q: %v", s.nodeName, err)
 	}
 
 	originalNode := node.DeepCopy()
 	if originalNode == nil {
-		return fmt.Errorf("nil %q node object", kl.nodeName)
+		return fmt.Errorf("nil %q node object", s.nodeName)
 	}
 
 	podCIDRChanged := false
@@ -431,15 +597,15 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 		// node.Spec.PodCIDR being non-empty. We also need to know if pod CIDR is
 		// actually changed.
 		podCIDRs := strings.Join(node.Spec.PodCIDRs, ",")
-		if podCIDRChanged, err = kl.updatePodCIDR(podCIDRs); err != nil {
+		if podCIDRChanged, err = s.updatePodCIDRFunc(podCIDRs); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
 
-	kl.setNodeStatus(node)
+	s.setNodeStatus(node)
 
-	now := kl.clock.Now()
-	if now.Before(kl.lastStatusReportTime.Add(kl.nodeStatusReportFrequency)) {
+	now := s.clock.Now()
+	if now.Before(s.lastStatusReportTime.Add(s.nodeStatusReportFrequency)) {
 		if !podCIDRChanged && !nodeStatusHasChanged(&originalNode.Status, &node.Status) {
 			// We must mark the volumes as ReportedInUse in volume manager's dsw even
 			// if no changes were made to the node status (no volumes were added or removed
@@ -457,21 +623,21 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 			// because it does not have access to the Node object.
 			// This also cannot be populated on node status manager init because the volume
 			// may not have been added to dsw at that time.
-			kl.volumeManager.MarkVolumesAsReportedInUse(node.Status.VolumesInUse)
+			s.volumeManager.MarkVolumesAsReportedInUse(node.Status.VolumesInUse)
 			return nil
 		}
 	}
 
 	// Patch the current status on the API server
-	updatedNode, _, err := nodeutil.PatchNodeStatus(kl.heartbeatClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, node)
+	updatedNode, _, err := nodeutil.PatchNodeStatus(s.heartbeatClient.CoreV1(), s.nodeName, originalNode, node)
 	if err != nil {
 		return err
 	}
-	kl.lastStatusReportTime = now
-	kl.setLastObservedNodeAddresses(updatedNode.Status.Addresses)
+	s.lastStatusReportTime = now
+	s.setLastObservedNodeAddressesFunc(updatedNode.Status.Addresses)
 	// If update finishes successfully, mark the volumeInUse as reportedInUse to indicate
 	// those volumes are already updated in the node's status
-	kl.volumeManager.MarkVolumesAsReportedInUse(updatedNode.Status.VolumesInUse)
+	s.volumeManager.MarkVolumesAsReportedInUse(updatedNode.Status.VolumesInUse)
 	return nil
 }
 
@@ -508,8 +674,8 @@ func (kl *Kubelet) recordNodeSchedulableEvent(node *v1.Node) error {
 // any fields that are currently set.
 // TODO(madhusudancs): Simplify the logic for setting node conditions and
 // refactor the node status condition code out to a different file.
-func (kl *Kubelet) setNodeStatus(node *v1.Node) {
-	for i, f := range kl.setNodeStatusFuncs {
+func (s *NodeStatusManager) setNodeStatus(node *v1.Node) {
+	for i, f := range s.nodeStatusFuncs {
 		klog.V(5).Infof("Setting node status at position %v", i)
 		if err := f(node); err != nil {
 			klog.Errorf("Failed to set some node status fields: %s", err)
@@ -542,7 +708,7 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(*v1.Node) error {
 	}
 	var setters []func(n *v1.Node) error
 	setters = append(setters,
-		nodestatus.NodeAddress(kl.nodeIP, kl.nodeIPValidator, kl.hostname, kl.hostnameOverridden, kl.externalCloudProvider, kl.cloud, nodeAddressesFunc),
+		nodestatus.NodeAddress(kl.nodeIP, ValidateNodeIP, kl.hostname, kl.hostnameOverridden, kl.externalCloudProvider, kl.cloud, nodeAddressesFunc),
 		nodestatus.MachineInfo(string(kl.nodeName), kl.maxPods, kl.podsPerCore, kl.GetCachedMachineInfo, kl.containerManager.GetCapacity,
 			kl.containerManager.GetDevicePluginResourceCapacity, kl.containerManager.GetNodeAllocatableReservation, kl.recordEvent),
 		nodestatus.VersionInfo(kl.cadvisor.VersionInfo, kl.containerRuntime.Type, kl.containerRuntime.Version),
@@ -568,8 +734,8 @@ func (kl *Kubelet) defaultNodeStatusFuncs() []func(*v1.Node) error {
 	return setters
 }
 
-// Validate given node IP belongs to the current host
-func validateNodeIP(nodeIP net.IP) error {
+// ValidateNodeIP validate given node IP belongs to the current host.
+func ValidateNodeIP(nodeIP net.IP) error {
 	// Honor IP limitations set in setNodeStatus()
 	if nodeIP.To4() == nil && nodeIP.To16() == nil {
 		return fmt.Errorf("nodeIP must be a valid IP address")
@@ -654,4 +820,18 @@ func nodeConditionsHaveChanged(originalConditions []v1.NodeCondition, conditions
 		}
 	}
 	return false
+}
+
+// providerRequiresNetworkingConfiguration returns whether the cloud provider
+// requires special networking configuration.
+func providerRequiresNetworkingConfiguration(cloud cloudprovider.Interface) bool {
+	// TODO: We should have a mechanism to say whether native cloud provider
+	// is used or whether we are using overlay networking. We should return
+	// true for cloud providers if they implement Routes() interface and
+	// we are not using overlay networking.
+	if cloud == nil || cloud.ProviderName() != "gce" {
+		return false
+	}
+	_, supported := cloud.Routes()
+	return supported
 }
